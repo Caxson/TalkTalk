@@ -4,7 +4,8 @@ BIN        := bin/talktalk
 PKG        := github.com/Caxson/TalkTalk
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS    := -s -w -X $(PKG)/internal/version.Version=$(VERSION)
-STATICCHECK_VERSION := 2024.1.1
+STATICCHECK_VERSION := 2026.2.1
+# cgo + libopus are required: brew install opus pkg-config / apt install libopus-dev pkg-config
 
 .DEFAULT_GOAL := help
 
@@ -18,7 +19,7 @@ run: ## Run the server, loading .env if present
 
 .PHONY: build
 build: ## Build the binary into bin/
-	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/talktalk
+	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/talktalk
 
 .PHONY: test
 test: ## Run tests with the race detector
@@ -42,7 +43,7 @@ vet: ## Run go vet
 
 .PHONY: lint
 lint: ## Run staticcheck
-	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) ./...
+	GOTOOLCHAIN=$$(go env GOVERSION) go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) ./...
 
 .PHONY: check
 check: fmt-check vet lint test ## Everything CI runs

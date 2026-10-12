@@ -16,7 +16,12 @@ type Envelope struct {
 
 // WriteOK writes a 200 envelope carrying data.
 func WriteOK(w http.ResponseWriter, data any) {
-	write(w, http.StatusOK, Envelope{Success: true, Data: data})
+	Write(w, http.StatusOK, data)
+}
+
+// Write writes a success envelope with a specific status (e.g. 201).
+func Write(w http.ResponseWriter, status int, data any) {
+	write(w, status, Envelope{Success: true, Data: data})
 }
 
 // WriteError writes a failure envelope. msg must be safe to show to clients.

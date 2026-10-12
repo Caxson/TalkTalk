@@ -7,9 +7,28 @@ import (
 	"time"
 )
 
+// required holds the variables every valid configuration needs.
+var required = map[string]string{
+	EnvLLMAPIKey:       "llm-key",
+	EnvDashScopeAPIKey: "ds-key",
+}
+
+// lookupFrom overlays m on the required variables. A key mapped to "-"
+// is removed, to test missing values.
 func lookupFrom(m map[string]string) func(string) (string, bool) {
+	env := map[string]string{}
+	for k, v := range required {
+		env[k] = v
+	}
+	for k, v := range m {
+		if v == "-" {
+			delete(env, k)
+			continue
+		}
+		env[k] = v
+	}
 	return func(k string) (string, bool) {
-		v, ok := m[k]
+		v, ok := env[k]
 		return v, ok
 	}
 }

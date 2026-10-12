@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -21,11 +22,14 @@ const (
 	defaultShutdownTimeout = 10 * time.Second
 )
 
-// Options configures a Server. Zero values get safe defaults.
+// Options configures a Server. Zero values get safe defaults; nil
+// Sessions or Static leave those routes unmounted.
 type Options struct {
 	Logger          *slog.Logger
 	Version         string
 	ShutdownTimeout time.Duration
+	Sessions        SessionService
+	Static          fs.FS
 }
 
 // Server is TalkTalk's HTTP server.
@@ -46,6 +50,22 @@ func New(opts Options) *Server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	if opts.Sessions != nil {
+		mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
+		mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
+	}
+	if opts.Static != nil {
+		files := http.FileServerFS(opts.Static)
+		mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The page is small and changes with every build.
+			w.Header().Set("Cache-Control", "no-cache")
+			files.ServeHTTP(w, r)
+		}))
+		// Keep JSON errors for the API namespace.
+		mux.HandleFunc("GET /api/", func(w http.ResponseWriter, _ *http.Request) {
+			httpx.WriteError(w, http.StatusNotFound, http.StatusText(http.StatusNotFound))
+		})
+	}
 	s.handler = s.wrap(envelopeMuxErrors(mux))
 	return s
 }
