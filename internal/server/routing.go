@@ -14,7 +14,9 @@ func envelopeMuxErrors(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h, pattern := mux.Handler(r)
 		if pattern != "" {
-			h.ServeHTTP(w, r)
+			// Dispatch through the mux, not h: only ServeHTTP populates
+			// path wildcards for r.PathValue.
+			mux.ServeHTTP(w, r)
 			return
 		}
 		// No route matched: let the mux decide 404 vs 405, then re-render.

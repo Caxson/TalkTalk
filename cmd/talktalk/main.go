@@ -13,6 +13,7 @@ import (
 	"github.com/Caxson/TalkTalk/internal/config"
 	"github.com/Caxson/TalkTalk/internal/server"
 	"github.com/Caxson/TalkTalk/internal/version"
+	"github.com/Caxson/TalkTalk/internal/web"
 )
 
 func main() {
@@ -33,19 +34,32 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	sessions, err := newSessions(cfg, logger)
+	if err != nil {
+		return err
+	}
+
 	ln, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", cfg.HTTPAddr, err)
 	}
 
-	logger.Info("talktalk starting", "version", version.Version)
+	logger.Info("talktalk starting", "version", version.Version,
+		"llm", cfg.LLM.Model, "asr", cfg.Speech.ASRModel, "tts", cfg.Speech.TTSModel+"/"+cfg.Speech.TTSVoice)
 	srv := server.New(server.Options{
 		Logger:          logger,
 		Version:         version.Version,
 		ShutdownTimeout: cfg.ShutdownTimeout,
+		Sessions:        sessions,
+		Static:          web.Static(),
 	})
-	if err := srv.Serve(ctx, ln); err != nil {
-		return err
+	serveErr := srv.Serve(ctx, ln)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancel()
+	sessions.CloseAll(shutdownCtx)
+	if serveErr != nil {
+		return serveErr
 	}
 	logger.Info("talktalk stopped")
 	return nil

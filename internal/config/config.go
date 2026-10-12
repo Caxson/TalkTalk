@@ -4,7 +4,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -41,6 +40,10 @@ type Config struct {
 	LogLevel        slog.Level
 	LogFormat       LogFormat
 	ShutdownTimeout time.Duration
+
+	LLM          LLM
+	Speech       Speech
+	Conversation Conversation
 }
 
 // LookupFunc matches os.LookupEnv so tests can inject an environment.
@@ -48,35 +51,28 @@ type LookupFunc func(key string) (string, bool)
 
 // Load reads configuration through lookup and validates it.
 func Load(lookup LookupFunc) (Config, error) {
-	get := func(key, fallback string) string {
-		if v, ok := lookup(key); ok {
-			if v = strings.TrimSpace(v); v != "" {
-				return v
-			}
-		}
-		return fallback
-	}
-
-	var errs []error
+	r := &reader{lookup: lookup}
 	cfg := Config{}
 
-	addr, err := parseAddr(get(EnvHTTPAddr, DefaultHTTPAddr))
-	errs = appendErr(errs, EnvHTTPAddr, err)
+	addr, err := parseAddr(r.str(EnvHTTPAddr, DefaultHTTPAddr))
+	r.errs = appendErr(r.errs, EnvHTTPAddr, err)
 	cfg.HTTPAddr = addr
 
-	level, err := parseLevel(get(EnvLogLevel, "info"))
-	errs = appendErr(errs, EnvLogLevel, err)
+	level, err := parseLevel(r.str(EnvLogLevel, "info"))
+	r.errs = appendErr(r.errs, EnvLogLevel, err)
 	cfg.LogLevel = level
 
-	format, err := parseFormat(get(EnvLogFormat, string(LogFormatText)))
-	errs = appendErr(errs, EnvLogFormat, err)
+	format, err := parseFormat(r.str(EnvLogFormat, string(LogFormatText)))
+	r.errs = appendErr(r.errs, EnvLogFormat, err)
 	cfg.LogFormat = format
 
-	timeout, err := parseTimeout(get(EnvShutdownTimeout, DefaultShutdownTimeout.String()))
-	errs = appendErr(errs, EnvShutdownTimeout, err)
+	timeout, err := parseTimeout(r.str(EnvShutdownTimeout, DefaultShutdownTimeout.String()))
+	r.errs = appendErr(r.errs, EnvShutdownTimeout, err)
 	cfg.ShutdownTimeout = timeout
 
-	if err := errors.Join(errs...); err != nil {
+	loadProviders(r, &cfg)
+
+	if err := r.err(); err != nil {
 		return Config{}, fmt.Errorf("invalid configuration: %w", err)
 	}
 	return cfg, nil

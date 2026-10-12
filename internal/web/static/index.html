@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TalkTalk</title>
+  <link rel="preload" href="fonts/InstrumentSerif-400-italic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="mark">TALKTALK <span class="dim">/ voice transcript</span></div>
+    <div class="onair" id="onair" data-live="false">
+      <span class="tally" aria-hidden="true"></span>
+      <span id="onair-label">OFF AIR</span>
+      <span class="timecode" id="timecode">00:00:00</span>
+    </div>
+  </header>
+
+  <main class="sheet">
+    <section class="stage" aria-label="Conversation state">
+      <div class="label">State</div>
+      <h1 class="state" id="state-word">standby.</h1>
+      <div class="state-zh" id="state-zh">待命</div>
+
+      <dl class="meters">
+        <div class="meter">
+          <dt class="label">Mic</dt>
+          <dd class="ticks" id="meter-mic" data-active="false"></dd>
+        </div>
+        <div class="meter">
+          <dt class="label">Voice</dt>
+          <dd class="ticks" id="meter-voice" data-active="false"></dd>
+        </div>
+      </dl>
+
+      <div class="controls">
+        <button class="call" id="call" type="button">
+          <span class="bracket">[</span> <span id="call-label">Begin conversation · 开始对话</span> <span class="bracket">]</span>
+        </button>
+        <p class="hint">按空格键开始或结束。它说话时你可以直接插话。</p>
+        <p class="notice" id="notice" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section class="transcript" aria-label="Transcript">
+      <div class="section-head">
+        <span class="label">Transcript</span>
+        <span class="label dim" id="turn-count">0 turns</span>
+      </div>
+      <ol class="turns" id="turns">
+        <li class="card" id="empty-card">
+          <div class="no">No. 00</div>
+          <p class="card-line"><em>Nothing has been said yet.</em></p>
+          <p class="card-zh">点「开始对话」，允许麦克风，然后像打电话一样说话。它会一直听着，包括它自己在说话的时候。</p>
+          <table class="spec">
+            <tr><th>Listen</th><td>streaming recognition, 0.5 s pause ends your turn</td></tr>
+            <tr><th>Think</th><td>reply streams as it is written</td></tr>
+            <tr><th>Speak</th><td>first sentence plays before the rest is ready</td></tr>
+            <tr><th>Interrupt</th><td>say two words over it and it stops</td></tr>
+          </table>
+        </li>
+      </ol>
+    </section>
+  </main>
+
+  <section class="ledger" aria-label="Latency">
+    <div class="section-head">
+      <span class="label">Latency ledger</span>
+      <span class="label dim">you stop talking → first sound out · ms</span>
+    </div>
+    <table class="ledger-table">
+      <thead>
+        <tr><th>No.</th><th>Endpoint</th><th>First token</th><th>First audio</th><th>Out</th><th class="total">Total</th><th class="bar-col" aria-hidden="true"></th></tr>
+      </thead>
+      <tbody id="ledger"><tr class="ledger-empty"><td colspan="7">— no turns measured yet —</td></tr></tbody>
+    </table>
+  </section>
+
+  <audio id="voice" autoplay></audio>
+  <script src="app.js" type="module"></script>
+</body>
+</html>
