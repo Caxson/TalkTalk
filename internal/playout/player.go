@@ -32,6 +32,7 @@ type item struct {
 // Run drives playback.
 type Player struct {
 	enc     *audio.OpusEncoder
+	encode  func([]int16) ([]byte, error) // enc.Encode; swappable in tests
 	sink    Sink
 	silence []int16
 	played  chan int
@@ -40,7 +41,14 @@ type Player struct {
 	framer  *audio.Framer
 	queue   []item
 	pending int // queued audio frames
+
+	gain       float64 // applied to the frame being played
+	targetGain float64
 }
+
+// gainStep bounds the gain change per 20ms frame, so ducking ramps over a
+// few frames instead of clicking.
+const gainStep = 0.25
 
 // New returns a Player for mono PCM at sampleRate.
 func New(sampleRate int, sink Sink) (*Player, error) {
@@ -48,13 +56,25 @@ func New(sampleRate int, sink Sink) (*Player, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Player{
-		enc:     enc,
-		sink:    sink,
-		silence: make([]int16, enc.FrameSamples()),
-		played:  make(chan int, 256),
-		framer:  audio.NewFramer(sampleRate, audio.FrameDuration),
-	}, nil
+	p := &Player{
+		enc:        enc,
+		sink:       sink,
+		silence:    make([]int16, enc.FrameSamples()),
+		played:     make(chan int, 256),
+		framer:     audio.NewFramer(sampleRate, audio.FrameDuration),
+		gain:       1,
+		targetGain: 1,
+	}
+	p.encode = enc.Encode
+	return p, nil
+}
+
+// SetGain ramps playback volume toward g (0..1), e.g. to duck speech while
+// the user may be starting to talk.
+func (p *Player) SetGain(g float64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.targetGain = min(max(g, 0), 1)
 }
 
 // Played delivers mark ids in playback order.
@@ -95,6 +115,8 @@ func (p *Player) Flush() []int {
 	}
 	p.queue, p.pending = nil, 0
 	p.framer.Reset()
+	// Whatever plays next starts at full volume.
+	p.gain, p.targetGain = 1, 1
 	return dropped
 }
 
@@ -123,7 +145,7 @@ func (p *Player) run(ctx context.Context, ticks <-chan time.Time) error {
 		for _, id := range marks {
 			p.emit(id)
 		}
-		pkt, err := p.enc.Encode(frame)
+		pkt, err := p.encode(frame)
 		if err != nil {
 			return err
 		}
@@ -148,7 +170,7 @@ func (p *Player) next() ([]int16, []int) {
 		p.queue = nil
 		return p.silence, marks
 	}
-	f := p.queue[0].frame
+	f := p.applyGain(p.queue[0].frame)
 	p.queue = p.queue[1:]
 	p.pending--
 	// A mark right behind the last frame of a segment is due as soon as
@@ -158,6 +180,28 @@ func (p *Player) next() ([]int16, []int) {
 		p.queue = p.queue[1:]
 	}
 	return f, marks
+}
+
+// applyGain steps the gain toward its target and scales f in place (queued
+// frames are private copies). Called with mu held.
+func (p *Player) applyGain(f []int16) []int16 {
+	from := p.gain
+	switch {
+	case p.gain < p.targetGain:
+		p.gain = min(p.gain+gainStep, p.targetGain)
+	case p.gain > p.targetGain:
+		p.gain = max(p.gain-gainStep, p.targetGain)
+	}
+	if from == 1 && p.gain == 1 {
+		return f
+	}
+	// Interpolate across the frame so the step itself is inaudible.
+	n := float64(len(f))
+	for i, v := range f {
+		g := from + (p.gain-from)*float64(i+1)/n
+		f[i] = int16(float64(v) * g)
+	}
+	return f
 }
 
 func (p *Player) emit(id int) {

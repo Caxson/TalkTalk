@@ -236,3 +236,51 @@ func TestNewRejectsBadRate(t *testing.T) {
 		t.Error("want error for 44.1k")
 	}
 }
+
+func TestGainRampsAndFlushRestores(t *testing.T) {
+	h := newHarness(t)
+	var mu sync.Mutex
+	var levels []float64
+	h.p.mu.Lock()
+	h.p.encode = func(f []int16) ([]byte, error) {
+		mu.Lock()
+		levels = append(levels, audio.RMSdBFS(f))
+		mu.Unlock()
+		return []byte{1}, nil
+	}
+	h.p.mu.Unlock()
+
+	tone := make([]int16, 320)
+	for i := range tone {
+		tone[i] = 10000
+	}
+	for i := 0; i < 8; i++ {
+		h.p.Enqueue(tone)
+	}
+	h.tick(t, 2) // full volume
+	h.p.SetGain(0.25)
+	h.tick(t, 4) // ramp down over three frames, then hold
+	h.p.Flush()
+	h.p.Enqueue(tone)
+	h.tick(t, 1)
+
+	mu.Lock()
+	defer mu.Unlock()
+	full := audio.RMSdBFS(tone)
+	if len(levels) != 7 {
+		t.Fatalf("frames = %d", len(levels))
+	}
+	if levels[0] != full || levels[1] != full {
+		t.Errorf("before ducking: %.1f %.1f, want %.1f", levels[0], levels[1], full)
+	}
+	// Strictly decreasing during the ramp, never a jump to the target.
+	if !(levels[2] < full && levels[3] < levels[2] && levels[4] < levels[3]) {
+		t.Errorf("ramp not monotonic: %.1f", levels[2:5])
+	}
+	if d := levels[5] - full; d > -11.5 || d < -12.5 { // 0.25 ≈ -12 dB
+		t.Errorf("held ducked level %.1f dB relative, want ≈ -12", d)
+	}
+	if levels[6] != full {
+		t.Errorf("after Flush: %.1f, want full %.1f", levels[6], full)
+	}
+}

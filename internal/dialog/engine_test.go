@@ -6,6 +6,7 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -162,8 +163,36 @@ func (f fakeTTS) Synthesize(ctx context.Context, text string) iter.Seq2[[]int16,
 
 // ---- harness ----
 
+// gainPlayer records the requested gain on top of a real player.
+type gainPlayer struct {
+	*playout.Player
+	mu   sync.Mutex
+	gain float64
+}
+
+func (g *gainPlayer) SetGain(v float64) {
+	g.mu.Lock()
+	g.gain = v
+	g.mu.Unlock()
+	g.Player.SetGain(v)
+}
+
+func (g *gainPlayer) Flush() []int {
+	g.mu.Lock()
+	g.gain = 1
+	g.mu.Unlock()
+	return g.Player.Flush()
+}
+
+func (g *gainPlayer) gainTarget() float64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.gain
+}
+
 type harness struct {
 	t      *testing.T
+	player *gainPlayer
 	eng    *Engine
 	rec    *fakeRecognizer
 	llm    *fakeLLM
@@ -195,6 +224,7 @@ func newHarnessTTS(t *testing.T, tune func(*Config), synth fakeTTS, replies ...s
 
 	h := &harness{
 		t:      t,
+		player: &gainPlayer{Player: player, gain: 1},
 		rec:    newFakeRecognizer(),
 		llm:    &fakeLLM{replies: replies},
 		events: make(chan Event, 1024),
@@ -209,7 +239,7 @@ func newHarnessTTS(t *testing.T, tune func(*Config), synth fakeTTS, replies ...s
 		Recognizer: h.rec,
 		LLM:        h.llm,
 		TTS:        synth,
-		Player:     player,
+		Player:     h.player,
 		Notify:     func(e Event) { h.events <- e },
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -218,6 +248,10 @@ func newHarnessTTS(t *testing.T, tune func(*Config), synth fakeTTS, replies ...s
 	}
 	go func() { h.done <- h.eng.Run(ctx) }()
 	h.stream = <-h.rec.opened
+	// Open() returns before the engine publishes the stream to PushAudio.
+	for h.eng.stream.Load() == nil {
+		time.Sleep(time.Millisecond)
+	}
 	t.Cleanup(func() { h.shutdown() })
 	return h
 }
@@ -590,4 +624,135 @@ func TestUserExtendingEarlySentenceInterrupts(t *testing.T) {
 		t.Errorf("new turn = %q, want the added request answered", next.Text)
 	}
 	h.waitState(StateListening)
+}
+
+// ---- soft barge-in ----
+
+// loudSpeech is a 16 kHz frame well above any noise floor.
+func loudSpeech() []int16 {
+	f := make([]int16, 320)
+	for i := range f {
+		f[i] = int16(8000 * math.Sin(2*math.Pi*220*float64(i)/16000))
+	}
+	return f
+}
+
+// talk feeds d of loud audio through PushAudio in real time.
+func (h *harness) talk(d time.Duration) {
+	for i := 0; i < int(d/(20*time.Millisecond)); i++ {
+		h.eng.PushAudio(context.Background(), loudSpeech())
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (h *harness) quiet(d time.Duration) {
+	for i := 0; i < int(d/(20*time.Millisecond)); i++ {
+		h.eng.PushAudio(context.Background(), make([]int16, 320))
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func newSoftHarness(t *testing.T, replies ...string) *harness {
+	t.Helper()
+	return newHarnessWith(t, func(c *Config) { c.DuckHold = 400 * time.Millisecond }, 50*time.Millisecond, replies...)
+}
+
+const longReply = "这是一个很长很长的回答，会说上好一阵子，足够你在中间插话，我们来看看会发生什么事情。"
+
+func TestVoiceOnsetDucksBeforeAnyText(t *testing.T) {
+	h := newSoftHarness(t, longReply)
+	h.quiet(200 * time.Millisecond) // establish the noise floor
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	start := time.Now()
+	go h.talk(600 * time.Millisecond)
+	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
+	if d := time.Since(start); d > 400*time.Millisecond {
+		t.Errorf("yielded %v after the user started, want ≤ 400ms", d)
+	}
+	if h.player.gainTarget() >= 1 {
+		t.Error("player not ducked")
+	}
+}
+
+func TestUnconfirmedYieldResumes(t *testing.T) {
+	h := newSoftHarness(t, longReply)
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	h.talk(300 * time.Millisecond) // a cough: loud, but no words follow
+	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
+	go h.quiet(2 * time.Second)
+	h.waitFor("resume", func(e Event) bool { return e.Type == "resume" })
+	if h.player.gainTarget() != 1 {
+		t.Error("gain not restored")
+	}
+	h.waitState(StateListening) // the reply finished normally
+	if hist := texts(h.stop()); len(hist) != 2 || strings.Contains(hist[1], "打断") {
+		t.Errorf("history = %q, want an uninterrupted reply", hist)
+	}
+}
+
+func TestBackchannelWhileYieldingResumes(t *testing.T) {
+	h := newSoftHarness(t, longReply)
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	h.talk(300 * time.Millisecond)
+	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
+	h.say("嗯嗯。", true)
+	h.waitFor("resume", func(e Event) bool { return e.Type == "resume" })
+}
+
+func TestOneWordConfirmsWhenVoiceAgrees(t *testing.T) {
+	h := newSoftHarness(t, longReply, "好的我停下。")
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	go h.talk(800 * time.Millisecond)
+	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
+	time.Sleep(350 * time.Millisecond) // sustained voice
+	h.say("停", false)                  // a single substantive character
+	h.waitFor("interrupted", func(e Event) bool { return e.Type == "interrupted" })
+}
+
+func TestOneWordWithoutVoiceDoesNotInterrupt(t *testing.T) {
+	h := newSoftHarness(t, longReply)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	h.say("停", false) // no acoustic evidence: stays below the threshold
+	h.waitState(StateListening)
+	if hist := texts(h.stop()); strings.Contains(hist[len(hist)-1], "打断") {
+		t.Errorf("interrupted on one word without voice: %q", hist)
+	}
+}
+
+func TestNaturalEndWhileDuckedRestoresGain(t *testing.T) {
+	// ~0.65s of reply: long enough for voice to be detected mid-reply,
+	// short enough to end while still ducked (DuckHold is 5s).
+	h := newHarnessWith(t, func(c *Config) { c.DuckHold = 5 * time.Second }, 80*time.Millisecond, "这句话不算很长。")
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	go h.talk(200 * time.Millisecond)
+	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
+	h.waitState(StateListening)
+	if h.player.gainTarget() != 1 {
+		t.Error("gain left ducked after the reply ended")
+	}
+}
+
+func TestCoughThenOneWordDoesNotInterrupt(t *testing.T) {
+	h := newSoftHarness(t, longReply)
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	h.talk(200 * time.Millisecond) // a cough
+	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
+	h.quiet(150 * time.Millisecond) // quiet, inside the detector's hangover
+	h.say("停", false)               // one character, maybe misheard echo
+	h.waitState(StateListening)
+	if hist := texts(h.stop()); strings.Contains(hist[len(hist)-1], "打断") {
+		t.Errorf("a cough plus one character interrupted: %q", hist)
+	}
 }

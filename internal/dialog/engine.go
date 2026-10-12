@@ -20,6 +20,7 @@ import (
 	"github.com/Caxson/TalkTalk/internal/asr"
 	"github.com/Caxson/TalkTalk/internal/llm"
 	"github.com/Caxson/TalkTalk/internal/tts"
+	"github.com/Caxson/TalkTalk/internal/vad"
 )
 
 // Player is the playout queue (implemented by playout.Player).
@@ -28,6 +29,7 @@ type Player interface {
 	Mark(id int)
 	Flush() []int
 	Played() <-chan int
+	SetGain(g float64)
 }
 
 // Config tunes conversational behaviour.
@@ -47,6 +49,13 @@ type Config struct {
 	// endpointing: if an interim transcript stops changing for this long
 	// and no final arrives, the user is taken to be done.
 	PartialEndpointTimeout time.Duration
+
+	// Soft barge-in: on detected voice the assistant drops to DuckGain at
+	// once, and only stops when words confirm it. DuckHold is how long it
+	// stays ducked without confirmation once the user is quiet again.
+	DuckGain float64
+	DuckHold time.Duration
+	VAD      vad.Config
 }
 
 func (c Config) withDefaults() Config {
@@ -64,6 +73,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.PartialEndpointTimeout <= 0 {
 		c.PartialEndpointTimeout = 1200 * time.Millisecond
+	}
+	if c.DuckGain <= 0 || c.DuckGain >= 1 {
+		c.DuckGain = 0.25
+	}
+	if c.DuckHold <= 0 {
+		c.DuckHold = 1500 * time.Millisecond
 	}
 	return c
 }
@@ -95,6 +110,8 @@ type Engine struct {
 	nextMark    int
 
 	turnEvents chan turnEvent
+	voice      chan vad.Transition // from PushAudio's detector
+	det        *vad.Detector
 	gen        sync.WaitGroup // reply goroutines
 	stopped    chan struct{}  // closed when Run returns
 
@@ -106,6 +123,7 @@ type Engine struct {
 	turnSeq      int
 	partial      *asr.Result // latest interim result while nobody is talking
 	partialTimer *time.Timer
+	yield        yieldState
 	// interim marks the pendingUser entry that holds interim (not final)
 	// words, so the recognizer's late final replaces it instead of
 	// repeating it.
@@ -196,9 +214,14 @@ func New(cfg Config, d Deps) (*Engine, error) {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
+	cfg = cfg.withDefaults()
+	vcfg := cfg.VAD
+	vcfg.SampleRate = d.Recognizer.SampleRate()
 	return &Engine{
-		cfg:        cfg.withDefaults(),
+		cfg:        cfg,
 		d:          d,
+		det:        vad.New(vcfg),
+		voice:      make(chan vad.Transition, 16),
 		marks:      map[int]markInfo{},
 		turnEvents: make(chan turnEvent, 64),
 		stopped:    make(chan struct{}),
@@ -214,6 +237,7 @@ func (e *Engine) PushAudio(ctx context.Context, pcm []int16) {
 		return
 	}
 	ref.once.Do(func() { ref.started = e.d.Now() })
+	e.detectVoice(pcm)
 	if err := ref.s.Write(ctx, pcm); err != nil {
 		e.d.Logger.Debug("asr write failed", "err", err)
 	}
@@ -249,6 +273,8 @@ func (e *Engine) Run(ctx context.Context) error {
 				if !ok {
 					e.stream.Store(nil)
 					e.d.Logger.Warn("asr stream ended, reopening", "err", ref.s.Err())
+					// Nothing can confirm or release a yield while deaf.
+					e.resume("asr reconnect")
 					ref.s.Close() // release the dead connection before dialing anew
 					break loop
 				}
@@ -259,6 +285,10 @@ func (e *Engine) Run(ctx context.Context) error {
 				e.onTurnEvent(ev)
 			case <-e.partialFired():
 				e.onPartialStalled()
+			case tr := <-e.voice:
+				e.onVoice(tr)
+			case <-e.yieldFired():
+				e.onYieldTimer()
 			}
 		}
 	}
@@ -315,8 +345,11 @@ func (e *Engine) onASR(ref *streamRef, r asr.Result) {
 
 	switch e.state {
 	case StateSpeaking:
-		if words >= e.cfg.InterruptMinRunes {
+		if words >= e.interruptThreshold() {
 			e.bargeIn()
+		} else if e.yield.active && r.Final {
+			// Words arrived and they are only a backchannel.
+			e.resume("backchannel")
 		}
 	case StateThinking:
 		// The user kept talking before we made a sound: retract the
@@ -608,6 +641,9 @@ func (e *Engine) onPlayed(id int) {
 	e.currentTurn = 0
 	e.audioMu.Unlock()
 	e.turn = nil
+	if e.yield.active {
+		e.d.Player.SetGain(1) // no Flush on a natural end
+	}
 	e.d.Logger.Info("turn complete", "turn", t.id)
 	e.setState(StateListening)
 }
@@ -763,6 +799,10 @@ func (e *Engine) mark(turn int, m markInfo) bool {
 
 func (e *Engine) setState(s State) {
 	e.state = s
+	e.det.SetPlayback(s == StateSpeaking)
+	if s != StateSpeaking {
+		e.endYield()
+	}
 	e.notify(Event{Type: "state", State: s})
 }
 
