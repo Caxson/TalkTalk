@@ -14,6 +14,7 @@ const STATES = {
   listening: ["listening.", "在听"],
   thinking:  ["thinking.", "在想"],
   speaking:  ["speaking.", "在说"],
+  yielding:  ["yielding.", "让你说"],
 };
 const ICE_WAIT_MS = 2500;
 const TICKS = 64;
@@ -162,7 +163,10 @@ function addMetrics(m) {
 
 // ---------- server events ----------
 
+const eventLog = []; // { type, at } for automated checks
+
 function onEvent(ev) {
+  eventLog.push({ type: ev.type, at: performance.now() });
   switch (ev.type) {
     case "state": setState(ev.state); break;
     case "user": transcript.hearing(ev.text, ev.final); break;
@@ -171,6 +175,8 @@ function onEvent(ev) {
     case "assistant": transcript.reply(ev.turn, ev.text); break;
     case "backchannel": transcript.aside(ev.turn, ev.text); break;
     case "interrupted": transcript.cut(ev.turn); break;
+    case "yield": setState("yielding"); break;
+    case "resume": if (ui.stage.dataset.state === "yielding") setState("speaking"); break;
     case "metrics": addMetrics(ev.metrics); break;
     case "error": notice(`! ${ev.error}`); break;
   }
@@ -331,4 +337,4 @@ window.addEventListener("pagehide", end);
 setLive(false);
 
 // Exposed for automated end-to-end checks.
-window.__talktalk = { state: () => ui.stage.dataset.state, live: () => Boolean(call) };
+window.__talktalk = { state: () => ui.stage.dataset.state, live: () => Boolean(call), events: () => eventLog };

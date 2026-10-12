@@ -41,8 +41,11 @@ browser ◀─Opus/WebRTC── 20 ms playout ◀── TTS per sentence ◀─�
 - **Speculative replies.** A reply starts the moment the recognizer closes a
   sentence. If you keep talking before any sound plays, it is withdrawn and
   your sentences are answered together.
-- **Barge-in.** Two substantive characters over the assistant stop it; fillers
-  like 嗯 / 啊 are treated as backchannel. History keeps only what was heard.
+- **Soft barge-in.** When you start talking over the assistant it yields at
+  once, ducking to a quarter volume within a few frames, and stops only when
+  recognized words confirm it (two characters, or one if your voice has been
+  sustained, so 「停」 works). A cough or a 「嗯」 just dips the volume for a
+  moment. History keeps only what was heard.
 - **Missed endpoints.** If the recognizer never closes a sentence, the last
   interim transcript is answered after 1.2 s of no change.
 
@@ -58,8 +61,10 @@ providers, Chrome client on localhost (October 2026, 30+ turns):
 | + first audio (CosyVoice v3 flash) | ~0.4 s | ~0.5 s |
 | **Total** | **~1.7 s** | **~2.0 s** |
 
-Barge-in currently takes about 1.5 s from when you start talking until the
-assistant stops; this is bounded by interim recognition latency.
+Barge-in, measured on 10 interruptions with -50 dBFS room noise mixed in:
+the assistant yields (drops volume) ~0.15 s after you become audible and
+stops ~0.5 s after (p50; ~0.45 s / ~0.8 s counting from the start of each
+clip, which carries ~0.3 s of lead-in silence).
 
 ## Tests
 
@@ -79,7 +84,8 @@ cmd/talktalk/          entrypoint and wiring
 internal/dialog/       conversation engine: turns, barge-in, segmentation, latency
 internal/session/      one peer + playout + engine per browser connection
 internal/rtc/          Pion WebRTC peer (audio track + events data channel)
-internal/playout/      20 ms paced Opus playout with progress marks
+internal/playout/      20 ms paced Opus playout with progress marks and ducking
+internal/vad/          energy voice-activity detector for soft barge-in
 internal/asr/          streaming recognition (DashScope)
 internal/tts/          sentence synthesis (CosyVoice over DashScope)
 internal/llm/          OpenAI-compatible streaming chat

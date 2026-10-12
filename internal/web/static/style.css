@@ -72,6 +72,7 @@ body {
 }
 .stage[data-state="speaking"] .state { color: var(--ink); }
 .stage[data-state="standby"] .state { color: var(--muted); }
+.stage[data-state="yielding"] .state { color: var(--muted); }
 .state-zh { font-family: var(--serif); font-size: 22px; color: var(--muted); letter-spacing: .3em; }
 
 /* meters */
