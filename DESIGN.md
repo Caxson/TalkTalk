@@ -43,5 +43,10 @@ tiny mono slate marks (`TAKE 01`, fps, sync offset). The state word
 (*listening* / *thinking* / *speaking* / *yielding*) becomes its italic
 caption. Corner marks turn tally-red only while the assistant is audible.
 
+The default avatar is a full-colour anime (VRM) character. It is the only
+saturated thing on the page, which is the point: the monochrome archive
+frames one living colour. The slate marks get a translucent ground plate so
+they stay legible over hair and clothes.
+
 Without an avatar (assets not downloaded), the state word itself is the
 bold thing, set huge in italic serif.

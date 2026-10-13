@@ -85,17 +85,36 @@ func newLogger(cfg config.Config) *slog.Logger {
 }
 
 // avatarInfo enables the browser avatar when lip-sync is configured and
-// the downloaded renderer and avatar are present.
+// the chosen renderer's downloaded files are present.
 func avatarInfo(cfg config.Config, logger *slog.Logger) *server.AvatarInfo {
 	if cfg.Avatar.ModelPath == "" {
 		return nil
 	}
-	const renderer, model = "vendor/gaussian-splat-renderer-for-lam.module.js", "avatars/p2-1.zip"
-	for _, f := range []string{renderer, model} {
+	info := &server.AvatarInfo{Kind: cfg.Avatar.Kind}
+	var files []string
+	switch cfg.Avatar.Kind {
+	case "lam":
+		info.Renderer = "vendor/gaussian-splat-renderer-for-lam.module.js"
+		info.Model = "avatars/p2-1.zip"
+		files = []string{info.Renderer, info.Model}
+	default: // vrm
+		info.Renderer = "vendor/three-vrm.module.min.js"
+		info.Model = "avatars/AvatarSample_B.vrm"
+		info.Animation = "avatars/idle_loop.vrma"
+		files = []string{info.Renderer, info.Model, info.Animation,
+			"vendor/three-vrm-animation.module.min.js", "vendor/three/three.module.js"}
+	}
+	for _, f := range files {
 		if _, err := os.Stat(filepath.Join(cfg.Avatar.AssetsDir, f)); err != nil {
-			logger.Warn("avatar assets missing, run make assets", "file", f)
+			logger.Warn("avatar assets missing, run make assets", "kind", info.Kind, "file", f)
 			return nil
 		}
 	}
-	return &server.AvatarInfo{Renderer: "/assets/" + renderer, Model: "/assets/" + model}
+	for _, p := range []*string{&info.Renderer, &info.Model, &info.Animation} {
+		if *p != "" {
+			*p = "/assets/" + *p
+		}
+	}
+	logger.Info("avatar enabled", "kind", info.Kind, "model", info.Model)
+	return info
 }

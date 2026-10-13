@@ -36,10 +36,13 @@ type Options struct {
 	Avatar *AvatarInfo
 }
 
-// AvatarInfo tells the client where to load the avatar from.
+// AvatarInfo tells the client which avatar renderer to use and where its
+// files are.
 type AvatarInfo struct {
-	Renderer string `json:"renderer"` // ES module URL
-	Model    string `json:"model"`    // avatar ZIP URL
+	Kind      string `json:"kind"`                // "vrm" | "lam"
+	Renderer  string `json:"renderer"`            // ES module URL of the renderer library
+	Model     string `json:"model"`               // avatar file URL (.vrm or LAM .zip)
+	Animation string `json:"animation,omitempty"` // idle motion (.vrma), VRM only
 }
 
 // Server is TalkTalk's HTTP server.

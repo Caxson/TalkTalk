@@ -24,6 +24,7 @@ const (
 	EnvOnnxRuntimeLib = "TALKTALK_ONNXRUNTIME_LIB"
 	EnvMouthGain      = "TALKTALK_MOUTH_GAIN"
 	EnvAssetsDir      = "TALKTALK_ASSETS_DIR"
+	EnvAvatarKind     = "TALKTALK_AVATAR"
 )
 
 // Defaults chosen from measured latency (see README).
@@ -70,6 +71,8 @@ type Avatar struct {
 	// AssetsDir holds downloaded client assets (renderer, avatar), served
 	// under /assets/.
 	AssetsDir string
+	// Kind picks the renderer: "vrm" (anime, default) or "lam" (photoreal).
+	Kind string
 }
 
 // Conversation tunes the dialog engine and session limits.
@@ -108,6 +111,7 @@ func loadProviders(r *reader, cfg *Config) {
 		// CosyVoice speech gives a natural jaw range.
 		MouthGain: r.floatIn(EnvMouthGain, 1.6, 0.5, 4),
 		AssetsDir: r.str(EnvAssetsDir, "assets"),
+		Kind:      r.choice(EnvAvatarKind, "vrm", "vrm", "lam"),
 	}
 	cfg.Conversation = Conversation{
 		SystemPrompt:      r.str(EnvSystemPrompt, DefaultSystemPrompt),

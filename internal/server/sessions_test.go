@@ -147,10 +147,10 @@ func TestAvatarEndpointAndAssets(t *testing.T) {
 		"models/secret.onnx": {Data: []byte("400MB")},
 	}, "avatars", "vendor")
 	h = New(Options{Logger: discardLogger(), Assets: assets,
-		Avatar: &AvatarInfo{Renderer: "/assets/vendor/r.js", Model: "/assets/avatars/a.zip"}}).Handler()
+		Avatar: &AvatarInfo{Kind: "lam", Renderer: "/assets/vendor/r.js", Model: "/assets/avatars/a.zip"}}).Handler()
 	_, env := do(t, h, http.MethodGet, "/api/avatar", "")
 	d := env.Data.(map[string]any)
-	if d["enabled"] != true || d["model"] != "/assets/avatars/a.zip" || d["renderer"] != "/assets/vendor/r.js" {
+	if d["enabled"] != true || d["kind"] != "lam" || d["model"] != "/assets/avatars/a.zip" || d["renderer"] != "/assets/vendor/r.js" {
 		t.Errorf("avatar info = %v", d)
 	}
 	rec, _ := do(t, h, http.MethodGet, "/assets/avatars/a.zip", "")

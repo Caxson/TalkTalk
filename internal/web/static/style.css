@@ -78,16 +78,19 @@ body {
 /* avatar still: a framed film still; the state word becomes its caption */
 .still { margin: 0 0 8px; }
 .still-frame { position: relative; aspect-ratio: 4 / 5; width: 100%; max-height: 48vh; margin: 0 auto; border: 1px solid var(--rule); overflow: hidden; }
-/* The renderer frames the whole bust; render 1.6x larger and let the frame
-   crop it to a head-and-shoulders still (no resolution is lost). */
-.still-canvas { position: absolute; width: 160%; height: 160%; left: -30%; top: -32%; }
+.still-canvas { position: absolute; inset: 0; }
+/* LAM frames the whole bust and has no camera control: render 1.6x larger
+   and let the frame crop it to head and shoulders (no resolution lost). */
+body.avatar-lam .still-canvas { width: 160%; height: 160%; left: -30%; top: -32%; }
 .still-canvas canvas { width: 100% !important; height: 100% !important; display: block; }
 .corner { position: absolute; width: 14px; height: 14px; border-color: var(--ink); border-style: solid; border-width: 0; pointer-events: none; }
 .corner.tl { top: 8px; left: 8px; border-top-width: 1px; border-left-width: 1px; }
 .corner.tr { top: 8px; right: 8px; border-top-width: 1px; border-right-width: 1px; }
 .corner.bl { bottom: 8px; left: 8px; border-bottom-width: 1px; border-left-width: 1px; }
 .corner.br { bottom: 8px; right: 8px; border-bottom-width: 1px; border-right-width: 1px; }
-.still-meta { position: absolute; font-family: var(--mono); font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; }
+.still-meta { position: absolute; font-family: var(--mono); font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none;
+  /* Slate marks sit over a full-bleed picture: give them a quiet plate. */
+  background: color-mix(in srgb, var(--ground) 72%, transparent); padding: 2px 5px; }
 .tl-meta { top: 12px; left: 30px; }
 .tr-meta { top: 12px; right: 30px; }
 .bl-meta { bottom: 12px; left: 30px; }

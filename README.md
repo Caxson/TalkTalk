@@ -8,8 +8,9 @@ synthesis, and an avatar whose face and head are driven by a single stream of
 motion parameters (ARKit 52 blendshapes + head pose). The avatar keeps
 reacting while you speak, not only when it is its turn.
 
-> Status: **M2** — voice conversation with a lip-synced 3D Gaussian-splat
-> avatar in the browser. Speak, get answered, talk over it to cut it off.
+> Status: **M2** — voice conversation with a lip-synced avatar in the
+> browser: an anime VRM character by default, or a photoreal Gaussian-splat
+> head. Speak, get answered, talk over it to cut it off.
 
 ## Quick start
 
@@ -25,7 +26,7 @@ Optional avatar (macOS shown):
 
 ```bash
 brew install onnxruntime
-make assets                           # ~410 MB: lip-sync model, renderer, sample avatar
+make assets                           # ~440 MB: lip-sync model, renderers, sample avatars
 echo 'TALKTALK_LIPSYNC_MODEL=assets/models/wav2arkit_cpu.onnx' >> .env
 ```
 
@@ -54,6 +55,11 @@ browser ◀─Opus/WebRTC── 20 ms playout ◀── TTS per sentence ◀─�
   recognized words confirm it (two characters, or one if your voice has been
   sustained, so 「停」 works). A cough or a 「嗯」 just dips the volume for a
   moment. History keeps only what was heard.
+- **Avatars.** `TALKTALK_AVATAR=vrm` (default) shows pixiv's VRoid sample
+  character with an idle loop, spring-bone hair and gaze (eye contact while
+  listening, drifting up while thinking); its five vowel shapes are driven
+  from the ARKit stream with VMagicMirror's mapping. `TALKTALK_AVATAR=lam`
+  shows the LAM Gaussian-splat head, which takes the ARKit stream directly.
 - **Lip-sync.** Synthesized speech is run through wav2arkit (ONNX, CPU)
   on the server as it arrives; the model needs ~0.3 s of look-ahead, which
   server-side synthesis provides for free. Each blendshape frame is sent on
