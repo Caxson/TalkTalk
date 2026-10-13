@@ -13,6 +13,9 @@
 #   vendor/three/..., vendor/three-vrm*.module.min.js
 #                                      three.js 0.186.1 and @pixiv/three-vrm
 #                                      3.5.5 (both MIT) for the VRM renderer
+#   vendor/mediapipe/...               MediaPipe tasks-vision 1.1.0 and the
+#                                      face landmarker model (Apache-2.0); the
+#                                      camera is analysed in the browser only
 #
 # Overseas hosts: keep HTTPS_PROXY set if you need one. HF_ENDPOINT can
 # point at a Hugging Face mirror, e.g. https://hf-mirror.com.
@@ -92,6 +95,14 @@ npm_files https://registry.npmjs.org/@pixiv/three-vrm/-/three-vrm-3.5.5.tgz \
   "lib/three-vrm.module.min.js $V/three-vrm.module.min.js 99f943e956e52dbf52bbe418899e8a8ae5e35f5c79a94ab8e404926afc620bf2"
 npm_files https://registry.npmjs.org/@pixiv/three-vrm-animation/-/three-vrm-animation-3.5.5.tgz \
   "lib/three-vrm-animation.module.min.js $V/three-vrm-animation.module.min.js 31de9586a36a8ad806303b84358f11d74ce70ac1d2656b04e8a5da7a913aa907"
+
+MP="$V/mediapipe"
+npm_files https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.1.0.tgz \
+  "vision_bundle.mjs $MP/vision_bundle.mjs 9d5fc9ef74b22329cf9aa88dc543956d192b8c254210b187271614713eb5b10c" \
+  "wasm/vision_wasm_internal.js $MP/wasm/vision_wasm_internal.js 7c652617b5bef832f42878ce8c5f752b0724bca6054e4bc1013a37d4b1949723" \
+  "wasm/vision_wasm_internal.wasm $MP/wasm/vision_wasm_internal.wasm 782eda3ec1f414fdb4f1d66a8b59093eb4d5ab437e06117796abf05962d68eef"
+fetch https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task \
+  "$MP/face_landmarker.task" 64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff
 
 RENDERER="$DEST/vendor/gaussian-splat-renderer-for-lam.module.js"
 RENDERER_SHA=4800485f5d588c876a427e4fc9a57727c90f8a68e6ea910fc5140a73803ae983

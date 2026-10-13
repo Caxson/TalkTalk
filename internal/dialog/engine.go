@@ -54,6 +54,10 @@ type Config struct {
 	// and no final arrives, the user is taken to be done.
 	PartialEndpointTimeout time.Duration
 
+	// EchoTail is how long after the assistant stops talking its own words
+	// may still arrive from the recognizer as echo (default 2 s).
+	EchoTail time.Duration
+
 	// Soft barge-in: on detected voice the assistant drops to DuckGain at
 	// once, and only stops when words confirm it. DuckHold is how long it
 	// stays ducked without confirmation once the user is quiet again.
@@ -83,6 +87,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.DuckHold <= 0 {
 		c.DuckHold = 1500 * time.Millisecond
+	}
+	if c.EchoTail <= 0 {
+		c.EchoTail = 2 * time.Second
 	}
 	return c
 }
@@ -118,6 +125,7 @@ type Engine struct {
 
 	turnEvents chan turnEvent
 	voice      chan vad.Transition // from PushAudio's detector
+	visual     atomic.Pointer[visualReading]
 	det        *vad.Detector
 	gen        sync.WaitGroup // reply goroutines
 	stopped    chan struct{}  // closed when Run returns
@@ -131,6 +139,7 @@ type Engine struct {
 	partial      *asr.Result // latest interim result while nobody is talking
 	partialTimer *time.Timer
 	yield        yieldState
+	echoTail     echoTail // what was just said, for echo that arrives late
 	// interim marks the pendingUser entry that holds interim (not final)
 	// words, so the recognizer's late final replaces it instead of
 	// repeating it.
@@ -296,6 +305,8 @@ func (e *Engine) Run(ctx context.Context) error {
 				e.onVoice(tr)
 			case <-e.yieldFired():
 				e.onYieldTimer()
+			case <-e.recheckFired():
+				e.onRecheck()
 			}
 		}
 	}
@@ -346,12 +357,18 @@ func (e *Engine) onASR(ref *streamRef, r asr.Result) {
 	if r.Final && e.partial != nil && e.partial.SentenceID == r.SentenceID {
 		e.clearPartial()
 	}
+	if e.turn == nil && words > 0 && e.inEchoTail(r.Text) {
+		return
+	}
 	if e.reconcileEarlyTurn(r) {
 		return
 	}
 
 	switch e.state {
 	case StateSpeaking:
+		if words > 0 && e.isEcho(r.Text, words) {
+			return
+		}
 		if words >= e.interruptThreshold() {
 			e.bargeIn()
 		} else if e.yield.active && r.Final {
@@ -562,6 +579,7 @@ func (e *Engine) bargeIn() {
 		heard += "……（被用户打断）"
 	}
 	e.commit(t.userText, heard)
+	e.rememberSaid(t)
 	e.turn = nil
 	e.notify(Event{Type: "interrupted", Turn: t.id})
 	e.setState(StateListening)
@@ -643,6 +661,7 @@ func (e *Engine) onPlayed(id int) {
 		return
 	}
 	e.commit(t.userText, strings.Join(t.played, ""))
+	e.rememberSaid(t)
 	t.cancel()
 	e.audioMu.Lock()
 	e.currentTurn = 0

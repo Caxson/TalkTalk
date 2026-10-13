@@ -43,6 +43,15 @@ type AvatarInfo struct {
 	Renderer  string `json:"renderer"`            // ES module URL of the renderer library
 	Model     string `json:"model"`               // avatar file URL (.vrm or LAM .zip)
 	Animation string `json:"animation,omitempty"` // idle motion (.vrma), VRM only
+	// Perception, if set, lets the browser read the user's face (locally).
+	Perception *PerceptionInfo `json:"perception,omitempty"`
+}
+
+// PerceptionInfo locates MediaPipe's face landmarker for the browser.
+type PerceptionInfo struct {
+	Bundle string `json:"bundle"` // tasks-vision ES module
+	Wasm   string `json:"wasm"`   // directory of the WASM runtime
+	Model  string `json:"model"`  // face_landmarker.task
 }
 
 // Server is TalkTalk's HTTP server.

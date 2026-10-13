@@ -1,6 +1,7 @@
 // TalkTalk browser client: one WebRTC call, a transcript, a latency ledger.
 
 import { Avatar } from "./avatar.js";
+import { Perception, perceptionMessage, preloadPerception } from "./perception.js";
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -14,6 +15,7 @@ const ui = {
 
 let avatar = null;       // set once the avatar has loaded, if the server has one
 let motionNames = null;  // from the session's "avatar" event; may precede the avatar
+let avatarInfo = null;   // /api/avatar, including perception assets
 
 const STATES = {
   standby:   ["standby.", "待命"],
@@ -250,6 +252,34 @@ async function measureAudioDelay(pc) {
   } catch { /* stats are best-effort */ }
 }
 
+// ---------- perception ----------
+
+function setCam(on) {
+  const el = $("still-cam");
+  if (!el) return;
+  el.textContent = on ? "cam · local" : "cam off";
+  el.dataset.on = String(on);
+}
+
+// startPerception reads the user's face (in this browser only) to let the
+// avatar look at and react to them, and tells the server, 10 times a
+// second, just whether a face is there and whether its mouth moves.
+async function startPerception(c, dc) {
+  if (!avatar || !avatarInfo?.perception) return;
+  const p = new Perception(avatarInfo.perception, (r) => avatar?.perceive(r));
+  const ok = await p.start();
+  if (!ok || call !== c) {
+    if (!ok) console.warn("perception: camera or face landmarker unavailable; continuing without it");
+    p.stop();
+    return;
+  }
+  c.perception = p;
+  setCam(true);
+  c.perceptionTimer = setInterval(() => {
+    if (dc.readyState === "open") dc.send(JSON.stringify(perceptionMessage(p.reading, performance.now())));
+  }, 100);
+}
+
 // ---------- call lifecycle ----------
 
 function iceComplete(pc) {
@@ -304,6 +334,9 @@ async function begin() {
     }
   };
   const dc = pc.createDataChannel("events");
+  // The camera starts alongside negotiation, not after it: the avatar should
+  // be able to see the user from the first moment of the call.
+  startPerception(c, dc).catch((err) => console.warn("perception failed:", err));
   dc.onmessage = (m) => { try { onEvent(JSON.parse(m.data)); } catch (e) { console.error(e); } };
   // Motion frames: a late frame is useless, so no ordering, no retransmits.
   const md = pc.createDataChannel("motion", { ordered: false, maxRetransmits: 0 });
@@ -349,6 +382,10 @@ function end() {
   call = null;
   clearInterval(c.timer);
   clearInterval(c.syncTimer);
+  clearInterval(c.perceptionTimer);
+  c.perception?.stop();
+  avatar?.perceive(null);
+  setCam(false);
   c.meters.stop();
   c.mic.getTracks().forEach((t) => t.stop());
   if (c.id) api("DELETE", `/api/sessions/${c.id}`).catch(() => {});
@@ -377,11 +414,14 @@ if (ui.still) {
     if (!env?.data?.enabled) return;
     document.body.classList.add("avatar");
     ui.still.hidden = false;
+    avatarInfo = env.data;
     avatar = await Avatar.create({
       canvas: $("still-canvas"), load: $("still-load"), fps: $("still-fps"), sync: $("still-sync"), take: $("still-take"),
     }, env.data);
     if (!avatar) { document.body.classList.remove("avatar"); ui.still.hidden = true; return; }
     avatar.setState(ui.stage.dataset.state);
+    avatar.micLevel = () => parseFloat(ui.micMeter.dataset.level || "0");
+    if (env.data.perception) preloadPerception(env.data.perception).catch(() => {});
     if (motionNames) avatar.setNames(motionNames); // the call started first
   }).catch(() => {});
 }
@@ -389,5 +429,6 @@ if (ui.still) {
 // Exposed for automated end-to-end checks.
 window.__talktalk = {
   state: () => ui.stage.dataset.state, live: () => Boolean(call), events: () => eventLog,
-  avatar: () => avatar && { received: avatar.received, fps: avatar.fps, delay: avatar.delayMs, jaw: avatar.last?.[avatar.names?.indexOf("jawOpen")] ?? null, mouth: avatar.mouth },
+  avatar: () => avatar && { received: avatar.received, fps: avatar.fps, delay: avatar.delayMs, jaw: avatar.last?.[avatar.names?.indexOf("jawOpen")] ?? null, mouth: avatar.mouth,
+    reading: avatar.reading, smile: avatar.acted?.smile ?? 0, gaze: avatar.acted?.gaze ?? null, nod: avatar.acted?.nod ?? 0, headYaw: avatar.headYaw ?? null },
 };

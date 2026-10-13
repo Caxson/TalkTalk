@@ -4,6 +4,8 @@
 // blended between frames so motion stays smooth at any refresh rate.
 // Renderers (lam.js, vrm.js) read expression() once per drawn frame.
 
+import { Behavior } from "./behavior.js";
+
 const MOTION_HEADER = 4;   // uint32 sequence before the weights
 const KEEP_MS = 1000;      // frame history kept for interpolation
 const STALE_MS = 120;      // past the newest frame: relax to neutral
@@ -23,6 +25,22 @@ export class Avatar {
     this.fpsSince = performance.now();
     this.received = 0;
     this.mouth = 0;         // renderer-reported mouth opening, for checks
+    this.behavior = new Behavior();
+    this.reading = null;    // latest camera reading, if any
+    this.micLevel = () => 0;
+    this.lastAct = performance.now();
+    this.acted = null;      // latest behavior output, for checks
+  }
+
+  perceive(reading) { this.reading = reading; }
+
+  // act advances behavior one drawn frame (renderers call it once per frame).
+  act() {
+    const now = performance.now();
+    const dt = Math.min(100, now - this.lastAct);
+    this.lastAct = now;
+    this.acted = this.behavior.update(now, dt, this.state, this.reading, this.micLevel());
+    return this.acted;
   }
 
   // create mounts the renderer named by info.kind (from /api/avatar).

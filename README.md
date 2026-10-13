@@ -8,9 +8,9 @@ synthesis, and an avatar whose face and head are driven by a single stream of
 motion parameters (ARKit 52 blendshapes + head pose). The avatar keeps
 reacting while you speak, not only when it is its turn.
 
-> Status: **M2** — voice conversation with a lip-synced avatar in the
-> browser: an anime VRM character by default, or a photoreal Gaussian-splat
-> head. Speak, get answered, talk over it to cut it off.
+> Status: **M3** — voice conversation with a lip-synced avatar that also
+> sees you: it follows your face with its eyes, smiles back, nods into your
+> pauses, and won't mistake its own voice from your speakers for you.
 
 ## Quick start
 
@@ -26,7 +26,7 @@ Optional avatar (macOS shown):
 
 ```bash
 brew install onnxruntime
-make assets                           # ~440 MB: lip-sync model, renderers, sample avatars
+make assets                           # ~460 MB: lip-sync model, renderers, avatars, face landmarker
 echo 'TALKTALK_LIPSYNC_MODEL=assets/models/wav2arkit_cpu.onnx' >> .env
 ```
 
@@ -52,14 +52,31 @@ browser ◀─Opus/WebRTC── 20 ms playout ◀── TTS per sentence ◀─�
   your sentences are answered together.
 - **Soft barge-in.** When you start talking over the assistant it yields at
   once, ducking to a quarter volume within a few frames, and stops only when
-  recognized words confirm it (two characters, or one if your voice has been
-  sustained, so 「停」 works). A cough or a 「嗯」 just dips the volume for a
+  recognized words confirm it: two characters, or one (「停」) when the camera
+  also sees your mouth moving. A cough or a 「嗯」 just dips the volume for a
   moment. History keeps only what was heard.
+- **Echo.** Its own voice coming back through the microphone is recognized
+  three ways: the words match what it just said (checked during the reply
+  and for 2 s after it ends, when the last sentence's echo is still
+  arriving), or the camera sees you on screen with a still mouth (for short
+  sounds only, so a misreading camera can never lock you out). In a test
+  that fed the assistant's own voice back into the microphone at 30% with
+  no echo cancellation at all, it was never interrupted by itself and never
+  answered its own words.
 - **Avatars.** `TALKTALK_AVATAR=vrm` (default) shows pixiv's VRoid sample
   character with an idle loop, spring-bone hair and gaze (eye contact while
   listening, drifting up while thinking); its five vowel shapes are driven
   from the ARKit stream with VMagicMirror's mapping. `TALKTALK_AVATAR=lam`
   shows the LAM Gaussian-splat head, which takes the ARKit stream directly.
+- **Perception (camera, browser-only).** MediaPipe's face landmarker reads
+  your face in the page at 15 Hz; video never leaves the browser. The
+  avatar looks toward your face, answers a smile after a ~350 ms beat,
+  nods into short pauses while you talk, and holds steadier eye contact
+  while listening. The server receives only "a face is there" and "its
+  mouth is moving", ten times a second, and uses them against echo: while
+  you are on camera with a still mouth, sound the assistant hears is its
+  own voice leaking back, so it neither yields nor stops. With no camera,
+  or nobody in view, behaviour is unchanged.
 - **Lip-sync.** Synthesized speech is run through wav2arkit (ONNX, CPU)
   on the server as it arrives; the model needs ~0.3 s of look-ahead, which
   server-side synthesis provides for free. Each blendshape frame is sent on
@@ -86,10 +103,11 @@ providers, Chrome client on localhost (October 2026, 30+ turns):
 With the avatar on, the first sentence waits for ~0.5 s of audio so its
 mouth shapes are computed before it plays: +~0.12 s on average.
 
-Barge-in, measured on 10 interruptions with -50 dBFS room noise mixed in:
-the assistant yields (drops volume) ~0.15 s after you become audible and
-stops ~0.5 s after (p50; ~0.45 s / ~0.8 s counting from the start of each
-clip, which carries ~0.3 s of lead-in silence).
+Barge-in, measured on 10 interruptions with -50 dBFS room noise mixed in,
+no camera: 10/10 yield and stop; the assistant yields ~0.15 s after you
+become audible and stops ~1.3 s after (p50; 0.48 s / 1.58 s counting from
+the start of each clip, which carries ~0.3 s of lead-in silence). With the
+camera seeing you talk, one character confirms and stopping is ~0.5 s.
 
 ## Tests
 
