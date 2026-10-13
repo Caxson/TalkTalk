@@ -1,13 +1,13 @@
-// Avatar: a LAM Gaussian-splat head driven by lip-sync frames that the
-// server sends in lockstep with the audio. Frames are shown after the same
-// delay the browser applies to that audio (its jitter buffer), and blended
-// between frames so motion stays smooth at any refresh rate.
+// Avatar motion, independent of how the face is drawn. Lip-sync frames
+// arrive with the audio's packets but skip the jitter buffer, so they are
+// shown after the same delay the browser applies to that audio, and
+// blended between frames so motion stays smooth at any refresh rate.
+// Renderers (lam.js, vrm.js) read expression() once per drawn frame.
 
-const MOTION_HEADER = 4;          // uint32 sequence before the weights
-const KEEP_MS = 1000;             // frame history kept for interpolation
-const STALE_MS = 120;             // past the newest frame: relax to neutral
-const RELAX_TAU_MS = 90;          // neutral relaxation time constant
-const CHAT_STATE = { standby: "Idle", listening: "Listening", thinking: "Thinking", speaking: "Responding", yielding: "Listening" };
+const MOTION_HEADER = 4;   // uint32 sequence before the weights
+const KEEP_MS = 1000;      // frame history kept for interpolation
+const STALE_MS = 120;      // past the newest frame: relax to neutral
+const RELAX_TAU_MS = 90;   // neutral relaxation time constant
 
 export class Avatar {
   constructor(el) {
@@ -16,20 +16,23 @@ export class Avatar {
     this.frames = [];       // { at, w: Float32Array }
     this.delayMs = 80;
     this.state = "standby";
-    this.last = null;       // last weights returned, for relaxing
+    this.last = null;
     this.nextBlink = performance.now() + 2500;
     this.blinkAt = -1;
     this.fpsCount = 0;
     this.fpsSince = performance.now();
     this.received = 0;
+    this.mouth = 0;         // renderer-reported mouth opening, for checks
   }
 
-  // create loads the avatar described by info (from /api/avatar).
+  // create mounts the renderer named by info.kind (from /api/avatar).
   static async create(el, info) {
     if (!info?.enabled) return null;
     const a = new Avatar(el);
     try {
-      await a.load(info);
+      const mod = info.kind === "lam" ? await import("./lam.js") : await import("./vrm.js");
+      await mod.mount(a, info);
+      el.load.hidden = true;
     } catch (err) {
       el.load.textContent = "avatar failed to load";
       console.error(err);
@@ -38,18 +41,7 @@ export class Avatar {
     return a;
   }
 
-  async load(info) {
-    const { GaussianSplatRenderer } = await import(info.renderer);
-    const pct = (p) => { this.el.load.textContent = `loading avatar · ${Math.round(p * 100)}%`; };
-    await GaussianSplatRenderer.getInstance(this.el.canvas, info.model, {
-      getExpressionData: () => this.expression(),
-      getChatState: () => CHAT_STATE[this.state] ?? "Idle",
-      downloadProgress: pct,
-      loadProgress: (p) => { if (p >= 1) this.el.load.hidden = true; },
-    });
-    this.el.load.hidden = true;
-  }
-
+  progress(p) { this.el.load.textContent = `loading avatar · ${Math.round(p * 100)}%`; }
   setNames(names) { this.names = names; }
   setState(state) { this.state = state; }
   setDelay(ms) { this.delayMs = ms; this.el.sync.textContent = `sync ${Math.round(ms)}ms`; }
@@ -64,22 +56,25 @@ export class Avatar {
     const now = performance.now();
     this.frames.push({ at: now, w });
     this.received++;
-    // Bound the buffer here too: rendering (which also prunes) pauses in
-    // background tabs while frames keep arriving.
+    // Bound the buffer here too: renderers pause in background tabs while
+    // frames keep arriving.
+    this.prune(now);
+  }
+
+  prune(t) {
     let drop = 0;
-    while (drop < this.frames.length - 2 && this.frames[drop + 1].at < now - KEEP_MS) drop++;
+    while (drop < this.frames.length - 2 && this.frames[drop + 1].at < t - KEEP_MS) drop++;
     if (drop) this.frames.splice(0, drop);
   }
 
-  // Called by the renderer every animation frame.
+  // expression returns { arkitName: weight } for this drawn frame, with a
+  // procedural blink folded into eyeBlinkLeft/Right.
   expression() {
     const now = performance.now();
     this.tickFps(now);
     if (!this.names) return {};
     const t = now - this.delayMs;
-    let drop = 0;
-    while (drop < this.frames.length - 2 && this.frames[drop + 1].at < t - KEEP_MS) drop++;
-    if (drop) this.frames.splice(0, drop);
+    this.prune(t);
 
     let w = this.sample(t);
     if (!w) {
@@ -125,7 +120,7 @@ export class Avatar {
     this.fpsCount++;
     if (now - this.fpsSince >= 1000) {
       this.fps = Math.round((this.fpsCount * 1000) / (now - this.fpsSince));
-      // Idle, the renderer throttles itself; a low number there is not news.
+      // Idle, renderers may throttle themselves; a low number there is not news.
       this.el.fps.textContent = this.state === "standby" ? "idle" : `${this.fps} fps`;
       this.fpsCount = 0;
       this.fpsSince = now;

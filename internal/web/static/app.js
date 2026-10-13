@@ -389,5 +389,5 @@ if (ui.still) {
 // Exposed for automated end-to-end checks.
 window.__talktalk = {
   state: () => ui.stage.dataset.state, live: () => Boolean(call), events: () => eventLog,
-  avatar: () => avatar && { received: avatar.received, fps: avatar.fps, delay: avatar.delayMs, jaw: avatar.last?.[avatar.names?.indexOf("jawOpen")] ?? null },
+  avatar: () => avatar && { received: avatar.received, fps: avatar.fps, delay: avatar.delayMs, jaw: avatar.last?.[avatar.names?.indexOf("jawOpen")] ?? null, mouth: avatar.mouth },
 };
