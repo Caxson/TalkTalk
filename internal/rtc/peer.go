@@ -22,6 +22,9 @@ const (
 	pendingMessages = 64
 	// EventsLabel is the data channel the client opens for events.
 	EventsLabel = "events"
+	// MotionLabel is the client's unordered, no-retransmit channel for
+	// avatar motion frames: a late frame is useless, never worth a stall.
+	MotionLabel = "motion"
 )
 
 // Config for a peer.
@@ -46,6 +49,7 @@ type Peer struct {
 	dc      *webrtc.DataChannel
 	dcOpen  bool
 	pending [][]byte
+	motion  *webrtc.DataChannel // set once open
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -167,7 +171,29 @@ func (p *Peer) Close() {
 	})
 }
 
+// SendMotion delivers one binary motion frame if the motion channel is
+// open; otherwise the frame is dropped.
+func (p *Peer) SendMotion(b []byte) {
+	p.mu.Lock()
+	dc := p.motion
+	p.mu.Unlock()
+	if dc == nil {
+		return
+	}
+	if err := dc.Send(b); err != nil {
+		p.cfg.Logger.Debug("send motion", "err", err)
+	}
+}
+
 func (p *Peer) onDataChannel(dc *webrtc.DataChannel) {
+	if dc.Label() == MotionLabel {
+		dc.OnOpen(func() {
+			p.mu.Lock()
+			p.motion = dc
+			p.mu.Unlock()
+		})
+		return
+	}
 	if dc.Label() != EventsLabel {
 		return
 	}

@@ -48,6 +48,10 @@ lint: ## Run staticcheck
 .PHONY: check
 check: fmt-check vet lint test ## Everything CI runs
 
+.PHONY: assets
+assets: ## Download the lip-sync model, avatar renderer and sample avatar
+	./scripts/fetch-assets.sh
+
 .PHONY: tidy
 tidy: ## Tidy go.mod
 	go mod tidy

@@ -16,6 +16,7 @@ import (
 
 	"github.com/Caxson/TalkTalk/internal/asr"
 	"github.com/Caxson/TalkTalk/internal/dialog"
+	"github.com/Caxson/TalkTalk/internal/lipsync"
 	"github.com/Caxson/TalkTalk/internal/llm"
 	"github.com/Caxson/TalkTalk/internal/playout"
 	"github.com/Caxson/TalkTalk/internal/rtc"
@@ -42,6 +43,8 @@ type Deps struct {
 	LLM        llm.Streamer
 	NewSynth   SynthFactory
 	Dialog     dialog.Config
+	// Lips enables avatar motion; nil means audio only.
+	Lips       func(sampleRate int) (dialog.LipStream, error)
 	ICEServers []string
 	Max        int
 	Logger     *slog.Logger
@@ -162,6 +165,7 @@ func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDesc
 		LLM:        m.d.LLM,
 		TTS:        synth,
 		Player:     player,
+		Lips:       m.d.Lips,
 		Notify: func(ev dialog.Event) {
 			if p := peer.Load(); p != nil {
 				p.Send(ev)
@@ -188,6 +192,11 @@ func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDesc
 		return nil, webrtc.SessionDescription{}, err
 	}
 	peer.Store(p)
+	if m.d.Lips != nil {
+		player.SetMotionSink(p.SendMotion)
+		names := lipsync.Names
+		p.Send(dialog.Event{Type: "avatar", Names: names[:], FrameRate: lipsync.FrameRate, Timestamp: time.Now()})
+	}
 
 	go func() {
 		// Pre-dial TTS so the first reply skips the handshake.

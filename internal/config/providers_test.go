@@ -92,3 +92,20 @@ func TestProviderValidationReportsEverything(t *testing.T) {
 		t.Error("error leaks secret values")
 	}
 }
+
+func TestAvatarConfig(t *testing.T) {
+	cfg, err := Load(lookupFrom(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Avatar.ModelPath != "" || cfg.Avatar.MouthGain != 1.6 || cfg.Avatar.AssetsDir != "assets" {
+		t.Errorf("Avatar defaults = %+v", cfg.Avatar)
+	}
+	cfg, err = Load(lookupFrom(map[string]string{EnvLipsyncModel: "/m.onnx", EnvMouthGain: "2.5", EnvOnnxRuntimeLib: "/lib.so"}))
+	if err != nil || cfg.Avatar.ModelPath != "/m.onnx" || cfg.Avatar.MouthGain != 2.5 || cfg.Avatar.LibraryPath != "/lib.so" {
+		t.Errorf("Avatar = %+v, err %v", cfg.Avatar, err)
+	}
+	if _, err := Load(lookupFrom(map[string]string{EnvMouthGain: "10"})); err == nil || !strings.Contains(err.Error(), EnvMouthGain) {
+		t.Errorf("out-of-range gain accepted: %v", err)
+	}
+}

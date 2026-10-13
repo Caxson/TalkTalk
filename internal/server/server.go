@@ -30,6 +30,16 @@ type Options struct {
 	ShutdownTimeout time.Duration
 	Sessions        SessionService
 	Static          fs.FS
+	// Assets serves downloaded client assets under /assets/ (nil: none).
+	Assets fs.FS
+	// Avatar describes the browser avatar; nil disables it.
+	Avatar *AvatarInfo
+}
+
+// AvatarInfo tells the client where to load the avatar from.
+type AvatarInfo struct {
+	Renderer string `json:"renderer"` // ES module URL
+	Model    string `json:"model"`    // avatar ZIP URL
 }
 
 // Server is TalkTalk's HTTP server.
@@ -53,6 +63,15 @@ func New(opts Options) *Server {
 	if opts.Sessions != nil {
 		mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
 		mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
+	}
+	mux.HandleFunc("GET /api/avatar", s.handleAvatar)
+	if opts.Assets != nil {
+		assets := http.StripPrefix("/assets/", http.FileServerFS(opts.Assets))
+		mux.Handle("GET /assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Versioned, multi-megabyte, immutable for a given download.
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			assets.ServeHTTP(w, r)
+		}))
 	}
 	if opts.Static != nil {
 		files := http.FileServerFS(opts.Static)
@@ -103,6 +122,17 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		return fmt.Errorf("http serve: %w", err)
 	}
 	return nil
+}
+
+func (s *Server) handleAvatar(w http.ResponseWriter, _ *http.Request) {
+	if s.opts.Avatar == nil {
+		httpx.WriteOK(w, map[string]bool{"enabled": false})
+		return
+	}
+	httpx.WriteOK(w, struct {
+		Enabled bool `json:"enabled"`
+		*AvatarInfo
+	}{true, s.opts.Avatar})
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {

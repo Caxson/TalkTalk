@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Caxson/TalkTalk/internal/asr"
+	"github.com/Caxson/TalkTalk/internal/lipsync"
 	"github.com/Caxson/TalkTalk/internal/llm"
 	"github.com/Caxson/TalkTalk/internal/playout"
 )
@@ -754,5 +755,111 @@ func TestCoughThenOneWordDoesNotInterrupt(t *testing.T) {
 	h.waitState(StateListening)
 	if hist := texts(h.stop()); strings.Contains(hist[len(hist)-1], "打断") {
 		t.Errorf("a cough plus one character interrupted: %q", hist)
+	}
+}
+
+// ---- lip-sync motion ----
+
+// fakeLips emits one frame per 1/30 s of pushed audio, with jawOpen set to
+// the segment's frame count so order is checkable; fail makes Push error.
+type fakeLips struct {
+	rate, pushed, emitted int
+	fail                  bool
+}
+
+func (f *fakeLips) Push(pcm []int16) ([]lipsync.Frame, error) {
+	if f.fail {
+		return nil, errors.New("model exploded")
+	}
+	f.pushed += len(pcm)
+	return f.take(f.pushed * lipsync.FrameRate / f.rate), nil
+}
+
+func (f *fakeLips) Flush() ([]lipsync.Frame, error) {
+	return f.take((f.pushed*lipsync.FrameRate + f.rate - 1) / f.rate), nil
+}
+
+func (f *fakeLips) take(upto int) []lipsync.Frame {
+	var out []lipsync.Frame
+	for ; f.emitted < upto; f.emitted++ {
+		var fr lipsync.Frame
+		fr[24] = float32(f.emitted%250) / 255
+		out = append(out, fr)
+	}
+	return out
+}
+
+func newLipHarness(t *testing.T, fail bool, replies ...string) (*harness, *motionLog) {
+	t.Helper()
+	log := &motionLog{}
+	h := newHarnessTTS(t, nil, fakeTTS{perRune: 60 * time.Millisecond, realTime: true}, replies...)
+	h.player.SetMotionSink(log.add)
+	h.eng.d.Lips = func(rate int) (LipStream, error) { return &fakeLips{rate: rate, fail: fail}, nil }
+	return h, log
+}
+
+type motionLog struct {
+	mu    sync.Mutex
+	count int
+	jaws  []byte
+}
+
+func (m *motionLog) add(b []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.count++
+	m.jaws = append(m.jaws, b[MotionHeader+24])
+}
+
+func (m *motionLog) snapshot() (int, []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.count, append([]byte(nil), m.jaws...)
+}
+
+func TestMotionFramesFollowAudio(t *testing.T) {
+	reply := "第一句话说完了。第二句也很快说完。"
+	h, log := newLipHarness(t, false, reply)
+	h.say("说话", true)
+	h.waitState(StateSpeaking)
+	h.waitState(StateListening)
+	n, jaws := log.snapshot()
+	// 60 ms of audio per rune, 30 frames per second, per segment.
+	want := 0
+	for _, seg := range []string{"第一句话说完了。", "第二句也很快说完。"} {
+		want += (len([]rune(seg))*60*lipsync.FrameRate + 999) / 1000
+	}
+	if n < want-2 || n > want+2 {
+		t.Errorf("motion frames sent = %d, want ≈ %d", n, want)
+	}
+	// Within a segment, frames arrive in order.
+	for i := 1; i < len(jaws) && i < 10; i++ {
+		if jaws[i] < jaws[i-1] {
+			t.Fatalf("motion out of order at %d: %v", i, jaws[:10])
+		}
+	}
+}
+
+func TestIdlePlayerHoldsLeadAudio(t *testing.T) {
+	h, _ := newLipHarness(t, false, "这一句话足够长，能让我们看到开头被稍微压后了一点点。")
+	h.say("说话", true)
+	m := h.waitFor("metrics", func(e Event) bool { return e.Type == "metrics" })
+	// realTime TTS: 500 ms of audio takes ≈500 ms to arrive.
+	if lead := m.Metrics.FirstAudioOut - m.Metrics.TTSFirstAudio; lead < 400*time.Millisecond {
+		t.Errorf("first audio only %v after TTS started; lip-sync lead not held", lead)
+	}
+	h.waitState(StateListening)
+}
+
+func TestLipFailureKeepsTalking(t *testing.T) {
+	h, log := newLipHarness(t, true, "口型坏了也要把话说完。")
+	h.say("说话", true)
+	h.waitState(StateSpeaking)
+	h.waitState(StateListening)
+	if n, _ := log.snapshot(); n != 0 {
+		t.Errorf("motion sent despite failing lip-sync: %d", n)
+	}
+	if hist := texts(h.stop()); len(hist) != 2 || hist[1] != "assistant:口型坏了也要把话说完。" {
+		t.Errorf("history = %q", hist)
 	}
 }

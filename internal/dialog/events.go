@@ -22,6 +22,7 @@ type Event struct {
 	// backchannel the user said something short over the reply (Turn, Text)
 	// interrupted the user cut the reply off (Turn)
 	// metrics     latency breakdown for a reply (Turn, Metrics)
+	// avatar      motion frames will follow on the motion channel (Names, FrameRate)
 	// error       something failed (Error)
 	Type string `json:"type"`
 
@@ -31,6 +32,8 @@ type Event struct {
 	Turn      int          `json:"turn,omitempty"`
 	Metrics   *TurnMetrics `json:"metrics,omitempty"`
 	Error     string       `json:"error,omitempty"`
+	Names     []string     `json:"names,omitempty"`
+	FrameRate int          `json:"frame_rate,omitempty"`
 	Timestamp time.Time    `json:"ts"`
 }
 

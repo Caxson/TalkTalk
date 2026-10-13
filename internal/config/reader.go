@@ -51,6 +51,19 @@ func (r *reader) intIn(key string, fallback, lo, hi int) int {
 	return n
 }
 
+func (r *reader) floatIn(key string, fallback, lo, hi float64) float64 {
+	raw := r.str(key, "")
+	if raw == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil || f < lo || f > hi {
+		r.fail(key, fmt.Errorf("want a number in %g-%g, got %q", lo, hi, raw))
+		return fallback
+	}
+	return f
+}
+
 func (r *reader) oneOf(key string, fallback int, allowed ...int) int {
 	n := r.intIn(key, fallback, 0, 1<<30)
 	for _, a := range allowed {

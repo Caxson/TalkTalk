@@ -3,6 +3,7 @@ package playout
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -282,5 +283,78 @@ func TestGainRampsAndFlushRestores(t *testing.T) {
 	}
 	if levels[6] != full {
 		t.Errorf("after Flush: %.1f, want full %.1f", levels[6], full)
+	}
+}
+
+func TestMotionTravelsWithItsAudio(t *testing.T) {
+	h := newHarness(t)
+	var mu sync.Mutex
+	var got []string // "audio" or the motion payload, in send order
+	h.p.mu.Lock()
+	h.p.encode = func(f []int16) ([]byte, error) {
+		mu.Lock()
+		if f[0] != 0 {
+			got = append(got, "audio")
+		}
+		mu.Unlock()
+		return []byte{1}, nil
+	}
+	h.p.mu.Unlock()
+	h.p.SetMotionSink(func(b []byte) {
+		mu.Lock()
+		got = append(got, string(b))
+		mu.Unlock()
+	})
+
+	frame := func() []int16 { f := make([]int16, 320); f[0] = 1; return f }
+	h.p.Enqueue(frame()) // pre-existing audio: positions 0..319
+	start := h.p.EnqueuePos()
+	if start != 320 {
+		t.Fatalf("EnqueuePos = %d, want 320", start)
+	}
+	h.p.Enqueue(frame())
+	h.p.Enqueue(frame())
+	h.p.AttachMotion(start, []byte("m0"))     // first sample of frame 1
+	h.p.AttachMotion(start+319, []byte("m1")) // still frame 1
+	h.p.AttachMotion(start+320, []byte("m2")) // frame 2
+	h.tick(t, 4)
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"audio", "audio", "m0", "m1", "audio", "m2"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("send order %v, want %v", got, want)
+	}
+}
+
+func TestFlushDropsMotionAndMovesTimeline(t *testing.T) {
+	h := newHarness(t)
+	var mu sync.Mutex
+	var sent []string
+	h.p.SetMotionSink(func(b []byte) { mu.Lock(); sent = append(sent, string(b)); mu.Unlock() })
+	h.p.Enqueue(make([]int16, 3*320))
+	h.p.AttachMotion(640, []byte("stale"))
+	h.p.Flush()
+	next := h.p.EnqueuePos()
+	if next != 960 {
+		t.Errorf("EnqueuePos after flush = %d, want 960 (timeline keeps moving)", next)
+	}
+	h.p.AttachMotion(100, []byte("too-old")) // belongs to flushed audio
+	h.p.Enqueue(make([]int16, 320))
+	h.p.AttachMotion(next, []byte("fresh"))
+	h.tick(t, 3)
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(sent, ",") != "fresh" {
+		t.Errorf("sent %v, want only fresh", sent)
+	}
+}
+
+func TestMarkPaddingCountsOnTimeline(t *testing.T) {
+	h := newHarness(t)
+	h.p.Enqueue(make([]int16, 100))
+	h.p.Mark(1)
+	if pos := h.p.EnqueuePos(); pos != 320 {
+		t.Errorf("EnqueuePos after padded mark = %d, want 320", pos)
 	}
 }
