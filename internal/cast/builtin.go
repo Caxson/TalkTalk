@@ -19,18 +19,6 @@ func Builtin() []Character {
 			Credit:  "This content uses sample data owned and copyrighted by Live2D Inc.",
 		},
 		{
-			ID: "shino", Name: "Shino", Tagline: "三维二次元 · 御姐",
-			Kind: KindVRM, Model: "avatars/Sendagaya_Shino.vrm", Animation: "avatars/idle_loop.vrma",
-			Voice:   "longanya_v3",
-			Persona: "你的名字叫栞（Shino），是位成熟、从容的姐姐，说话慢一点、带点慵懒和调侃，但始终得体，不说露骨的话。",
-		},
-		{
-			ID: "sora", Name: "Sora", Tagline: "ARKit 52 全表情 · 微表情样机",
-			Kind: KindVRM, Model: "avatars/ps_female.vrm", Animation: "avatars/idle_loop.vrma",
-			Voice:   "longxiaochun_v3",
-			Persona: "你的名字叫 Sora，性格安静、观察力强，说话简洁温和。",
-		},
-		{
 			ID: "ya", Name: "Ya", Tagline: "真人写实 · 知性",
 			Kind: KindLAM, Model: "avatars/status.zip",
 			Voice:   "longanwen_v3",
