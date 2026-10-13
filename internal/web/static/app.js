@@ -10,12 +10,13 @@ const ui = {
   stage: document.querySelector(".stage"), word: $("state-word"), zh: $("state-zh"),
   turns: $("turns"), turnCount: $("turn-count"), ledger: $("ledger"),
   voice: $("voice"), micMeter: $("meter-mic"), voiceMeter: $("meter-voice"),
-  still: $("still"),
+  still: $("still"), cast: $("cast"), castList: $("cast-list"), castCount: $("cast-count"),
 };
 
 let avatar = null;       // set once the avatar has loaded, if the server has one
 let motionNames = null;  // from the session's "avatar" event; may precede the avatar
-let avatarInfo = null;   // /api/avatar, including perception assets
+let avatarInfo = null;   // the chosen character from /api/characters, plus perception assets
+let character = "";      // id of the character this page talks to ("" = server default)
 
 const STATES = {
   standby:   ["standby.", "待命"],
@@ -44,6 +45,8 @@ function setLive(live) {
   ui.onairLabel.textContent = live ? "ON AIR" : "OFF AIR";
   ui.call.dataset.live = String(live);
   ui.callLabel.textContent = live ? "End conversation · 挂断" : "Begin conversation · 开始对话";
+  // The cast is fixed for the length of a call.
+  ui.castList?.querySelectorAll("button").forEach((b) => { b.disabled = live; });
   if (!live) setState("standby");
 }
 
@@ -306,6 +309,7 @@ async function api(method, path, body) {
 async function begin() {
   ui.call.disabled = true;
   notice("");
+  await castReady;
   let mic;
   try {
     mic = await navigator.mediaDevices.getUserMedia({
@@ -350,7 +354,7 @@ async function begin() {
     await pc.setLocalDescription(await pc.createOffer());
     await iceComplete(pc);
     if (abandoned()) return;
-    const ans = await api("POST", "/api/sessions", { type: "offer", sdp: pc.localDescription.sdp });
+    const ans = await api("POST", "/api/sessions", { type: "offer", sdp: pc.localDescription.sdp, character });
     if (abandoned()) {
       api("DELETE", `/api/sessions/${ans.id}`).catch(() => {});
       return;
@@ -407,28 +411,90 @@ window.addEventListener("pagehide", end);
 [ui.micMeter, ui.voiceMeter].forEach(buildTicks);
 setLive(false);
 
-// Load the avatar (if the server has one) while the page sits in standby.
+// ---------- cast ----------
+
+const CAST_KEY = "talktalk.cast";
+const KIND_MARK = { vrm: "VRM", live2d: "L2D", lam: "3DGS" };
+
+// chooseCharacter picks from the URL (?cast=id), then the last choice on
+// this browser, then the server's default.
+function chooseCharacter(cast) {
+  const ids = new Set(cast.characters.map((c) => c.id));
+  const fromURL = new URLSearchParams(location.search).get("cast");
+  let saved = null;
+  try { saved = localStorage.getItem(CAST_KEY); } catch { /* storage blocked */ }
+  return [fromURL, saved, cast.default].find((id) => id && ids.has(id)) ?? cast.characters[0]?.id ?? "";
+}
+
+// Switching reloads the page: renderers own a WebGL context (LAM's is a
+// singleton), so a clean page is the reliable way to swap bodies.
+function switchTo(id) {
+  if (call || id === character) return;
+  try { localStorage.setItem(CAST_KEY, id); } catch { /* storage blocked */ }
+  const url = new URL(location.href);
+  url.searchParams.set("cast", id);
+  location.assign(url);
+}
+
+function renderCast(cast) {
+  if (!ui.cast || cast.characters.length < 2) return;
+  ui.cast.hidden = false;
+  ui.castCount.textContent = String(cast.characters.length).padStart(2, "0");
+  ui.castList.replaceChildren(...cast.characters.map((c, i) => {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cast-row";
+    btn.dataset.id = c.id;
+    btn.setAttribute("aria-pressed", String(c.id === character));
+    btn.innerHTML = `<span class="cast-no"></span><span class="cast-name"></span><span class="cast-tag"></span><span class="cast-kind"></span>`;
+    btn.querySelector(".cast-no").textContent = `No. ${String(i + 1).padStart(2, "0")}`;
+    btn.querySelector(".cast-name").textContent = c.name;
+    btn.querySelector(".cast-tag").textContent = c.tagline ?? "";
+    btn.querySelector(".cast-kind").textContent = KIND_MARK[c.kind] ?? c.kind;
+    btn.disabled = Boolean(call);
+    btn.addEventListener("click", () => switchTo(c.id));
+    li.append(btn);
+    return li;
+  }));
+}
+
+// Load the cast first: a call must not start before the character is
+// known, or it would get the default voice behind another character's face.
+const castReady = fetch("/api/characters").then((r) => r.json()).then((env) => {
+  const cast = env?.data;
+  if (!cast?.characters?.length) return null;
+  character = chooseCharacter(cast);
+  renderCast(cast);
+  return cast;
+}).catch((err) => { console.warn("cast failed to load:", err); return null; });
+
+// Then the chosen character's avatar, while the page sits in standby.
 if (ui.still) {
   ui.still.hidden = true;
-  fetch("/api/avatar").then((r) => r.json()).then(async (env) => {
-    if (!env?.data?.enabled) return;
+  castReady.then(async (cast) => {
+    const info = cast?.characters.find((c) => c.id === character);
+    if (!info?.model) return; // voice only
     document.body.classList.add("avatar");
     ui.still.hidden = false;
-    avatarInfo = env.data;
+    avatarInfo = { ...info, perception: cast.perception };
+    $("still-take").textContent = `${info.name} · Take 01`;
+    if (info.credit) Object.assign($("still-credit"), { textContent: info.credit, hidden: false });
+    $("still-canvas").setAttribute("aria-label", `${info.name}, TalkTalk avatar`);
     avatar = await Avatar.create({
       canvas: $("still-canvas"), load: $("still-load"), fps: $("still-fps"), sync: $("still-sync"), take: $("still-take"),
-    }, env.data);
+    }, avatarInfo);
     if (!avatar) { document.body.classList.remove("avatar"); ui.still.hidden = true; return; }
     avatar.setState(ui.stage.dataset.state);
     avatar.micLevel = () => parseFloat(ui.micMeter.dataset.level || "0");
-    if (env.data.perception) preloadPerception(env.data.perception).catch(() => {});
+    if (cast.perception) preloadPerception(cast.perception).catch(() => {});
     if (motionNames) avatar.setNames(motionNames); // the call started first
-  }).catch(() => {});
+  }).catch((err) => console.warn("avatar failed to load:", err));
 }
 
 // Exposed for automated end-to-end checks.
 window.__talktalk = {
-  state: () => ui.stage.dataset.state, live: () => Boolean(call), events: () => eventLog,
+  state: () => ui.stage.dataset.state, live: () => Boolean(call), events: () => eventLog, character: () => character,
   avatar: () => avatar && { received: avatar.received, fps: avatar.fps, delay: avatar.delayMs, jaw: avatar.last?.[avatar.names?.indexOf("jawOpen")] ?? null, mouth: avatar.mouth,
     reading: avatar.reading, smile: avatar.acted?.smile ?? 0, gaze: avatar.acted?.gaze ?? null, nod: avatar.acted?.nod ?? 0, headYaw: avatar.headYaw ?? null },
 };

@@ -1,30 +1,19 @@
-// Anime renderer: a VRM model (three.js + @pixiv/three-vrm). The model has
-// VRM's five vowel shapes rather than ARKit blendshapes, so lip-sync is
-// mapped onto them with VMagicMirror's ARKit→VRM formula (MIT). Hair and
+// Anime renderer: a VRM model (three.js + @pixiv/three-vrm). Most models
+// have only VRM's five vowel shapes, so lip-sync is mapped onto them with
+// VMagicMirror's ARKit→VRM formula (MIT). "Perfect Sync" models carry all
+// 52 ARKit shapes as custom expressions and are driven with them directly,
+// which keeps the micro-expressions the vowels throw away. Hair and
 // clothes move by the model's spring bones; an idle loop keeps the body
 // alive; the eyes hold contact while listening and drift up while thinking.
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { perfectSync, vowels } from "./rig.js";
 
 // Head-and-shoulders still: at 22° the frame spans ~0.43 m vertically at
 // 1.1 m, from the top of the hair (head bone + ~0.2 m) to the chest.
 const FRAMING = { fov: 22, distance: 1.1, above: 0.02, aim: 0.02 }; // metres around the head bone
 const LOOK = { drift: 0.035, thinkUp: 0.18, thinkSide: 0.12, follow: 0.28 }; // metres at the camera
-
-// clamp01((x - 0.15) / 0.45): VMagicMirror's dead zone and full-scale.
-const mapClamp = (x) => Math.min(1, Math.max(0, (x - 0.15) / 0.45));
-
-// vowels maps ARKit weights to VRM's aa/ih/ou, keeping their sum ≤ 1.
-export function vowels(e) {
-  const g = (k) => e[k] ?? 0;
-  let aa = mapClamp(2.0 * g("jawOpen"));
-  let ih = mapClamp(0.6 * (g("mouthSmileLeft") + g("mouthSmileRight")) - 0.1);
-  let ou = mapClamp(0.4 * (g("mouthPucker") + g("mouthFunnel") + g("jawForward")));
-  const sum = aa + ih + ou;
-  if (sum > 1) { aa /= sum; ih /= sum; ou /= sum; }
-  return { aa, ih, ou };
-}
 
 export async function mount(avatar, info) {
   document.body.classList.add("avatar-vrm");
@@ -90,6 +79,8 @@ export async function mount(avatar, info) {
   resize();
 
   const em = vrm.expressionManager;
+  const arkit = perfectSync(em.expressions.map((x) => x.expressionName));
+  if (arkit) avatar.el.take.textContent += " · ARKit 52";
   const head = vrm.humanoid.getNormalizedBoneNode("head");
   // Behavior offsets on the head, as applied last frame. They are taken
   // off before the animation updates and put back after, so they never
@@ -100,14 +91,25 @@ export async function mount(avatar, info) {
     const dt = Math.min(clock.getDelta(), 0.1);
     const e = avatar.expression();
     const b = avatar.act();
-    em.setValue("relaxed", Math.min(1, b.smile * 0.85));
-    const v = vowels(e);
-    em.setValue("aa", v.aa);
-    em.setValue("ih", v.ih);
-    em.setValue("ou", v.ou);
-    em.setValue("blinkLeft", e.eyeBlinkLeft ?? 0);
-    em.setValue("blinkRight", e.eyeBlinkRight ?? 0);
-    avatar.mouth = v.aa;
+    if (arkit) {
+      // The behavior's smile answers on the face's own smile shapes; the
+      // eyes are left to lookAt so camera following stays in one place.
+      for (const side of ["Left", "Right"]) e[`mouthSmile${side}`] = Math.max(e[`mouthSmile${side}`] ?? 0, b.smile * 0.6);
+      for (const [k, w] of Object.entries(e)) {
+        const name = !k.startsWith("eyeLook") && arkit.get(k.toLowerCase());
+        if (name) em.setValue(name, w);
+      }
+      avatar.mouth = e.jawOpen ?? 0;
+    } else {
+      em.setValue("relaxed", Math.min(1, b.smile * 0.85));
+      const v = vowels(e);
+      em.setValue("aa", v.aa);
+      em.setValue("ih", v.ih);
+      em.setValue("ou", v.ou);
+      em.setValue("blinkLeft", e.eyeBlinkLeft ?? 0);
+      em.setValue("blinkRight", e.eyeBlinkRight ?? 0);
+      avatar.mouth = v.aa;
+    }
 
     const now = performance.now();
     if (now > nextSaccade) {

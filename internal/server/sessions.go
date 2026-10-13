@@ -17,13 +17,15 @@ const maxOfferBytes = 64 << 10
 
 // SessionService starts and stops conversations (session.Manager).
 type SessionService interface {
-	Start(ctx context.Context, offer webrtc.SessionDescription) (id string, answer webrtc.SessionDescription, err error)
+	Start(ctx context.Context, offer webrtc.SessionDescription, character string) (id string, answer webrtc.SessionDescription, err error)
 	Close(id string) bool
 }
 
 type sdpBody struct {
 	Type string `json:"type"`
 	SDP  string `json:"sdp"`
+	// Character picks who answers ("" = the default character).
+	Character string `json:"character,omitempty"`
 }
 
 type sessionCreated struct {
@@ -37,7 +39,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	dec.DisallowUnknownFields()
 	var body sdpBody
 	if err := dec.Decode(&body); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, `body must be {"type":"offer","sdp":"..."} under 64KB`)
+		httpx.WriteError(w, http.StatusBadRequest, `body must be {"type":"offer","sdp":"...","character":"<optional id>"} under 64KB`)
 		return
 	}
 	if body.Type != "offer" || body.SDP == "" {
@@ -45,8 +47,11 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, answer, err := s.opts.Sessions.Start(r.Context(), webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: body.SDP})
+	id, answer, err := s.opts.Sessions.Start(r.Context(), webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: body.SDP}, body.Character)
 	switch {
+	case errors.Is(err, session.ErrUnknownCharacter):
+		httpx.WriteError(w, http.StatusBadRequest, "no such character; see GET /api/characters")
+		return
 	case errors.Is(err, session.ErrCapacity):
 		httpx.WriteError(w, http.StatusServiceUnavailable, "all conversation slots are busy, try again later")
 		return

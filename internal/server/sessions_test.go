@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,12 +19,14 @@ import (
 
 type fakeSessions struct {
 	gotOffer webrtc.SessionDescription
+	gotChar  string
 	err      error
 	closed   []string
 }
 
-func (f *fakeSessions) Start(_ context.Context, offer webrtc.SessionDescription) (string, webrtc.SessionDescription, error) {
+func (f *fakeSessions) Start(_ context.Context, offer webrtc.SessionDescription, character string) (string, webrtc.SessionDescription, error) {
 	f.gotOffer = offer
+	f.gotChar = character
 	if f.err != nil {
 		return "", webrtc.SessionDescription{}, f.err
 	}
@@ -58,6 +61,13 @@ func TestCreateSession(t *testing.T) {
 	if fs.gotOffer.Type != webrtc.SDPTypeOffer || fs.gotOffer.SDP != "v=0 offer" {
 		t.Errorf("offer = %+v", fs.gotOffer)
 	}
+	if fs.gotChar != "" {
+		t.Errorf("character = %q, want default", fs.gotChar)
+	}
+	do(t, h, http.MethodPost, "/api/sessions", `{"type":"offer","sdp":"v=0 offer","character":"mio"}`)
+	if fs.gotChar != "mio" {
+		t.Errorf("character = %q, want mio", fs.gotChar)
+	}
 }
 
 func TestCreateSessionRejectsBadBodies(t *testing.T) {
@@ -80,6 +90,7 @@ func TestCreateSessionMapsErrors(t *testing.T) {
 		status int
 	}{
 		{session.ErrCapacity, http.StatusServiceUnavailable},
+		{fmt.Errorf("%w: %q", session.ErrUnknownCharacter, "ghost"), http.StatusBadRequest},
 		{errors.New("rtc: set offer: bad sdp"), http.StatusBadRequest},
 	}
 	for _, c := range cases {
@@ -137,21 +148,24 @@ func TestStaticFiles(t *testing.T) {
 	}
 }
 
-func TestAvatarEndpointAndAssets(t *testing.T) {
+func TestCharactersEndpointAndAssets(t *testing.T) {
 	h := New(Options{Logger: discardLogger()}).Handler()
-	if _, env := do(t, h, http.MethodGet, "/api/avatar", ""); env.Data.(map[string]any)["enabled"] != false {
-		t.Errorf("avatar without config = %+v", env)
+	if _, env := do(t, h, http.MethodGet, "/api/characters", ""); len(env.Data.(map[string]any)["characters"].([]any)) != 0 {
+		t.Errorf("characters without a cast = %+v", env)
 	}
 	assets := PublicFS(fstest.MapFS{
 		"avatars/a.zip":      {Data: []byte("zip")},
 		"models/secret.onnx": {Data: []byte("400MB")},
 	}, "avatars", "vendor")
 	h = New(Options{Logger: discardLogger(), Assets: assets,
-		Avatar: &AvatarInfo{Kind: "lam", Renderer: "/assets/vendor/r.js", Model: "/assets/avatars/a.zip"}}).Handler()
-	_, env := do(t, h, http.MethodGet, "/api/avatar", "")
+		Cast: &CastInfo{Default: "chen", Characters: []CharacterInfo{
+			{ID: "chen", Name: "Chen", Kind: "lam", Renderer: "/assets/vendor/r.js", Model: "/assets/avatars/a.zip"},
+		}}}).Handler()
+	_, env := do(t, h, http.MethodGet, "/api/characters", "")
 	d := env.Data.(map[string]any)
-	if d["enabled"] != true || d["kind"] != "lam" || d["model"] != "/assets/avatars/a.zip" || d["renderer"] != "/assets/vendor/r.js" {
-		t.Errorf("avatar info = %v", d)
+	c := d["characters"].([]any)[0].(map[string]any)
+	if d["default"] != "chen" || c["kind"] != "lam" || c["model"] != "/assets/avatars/a.zip" || c["renderer"] != "/assets/vendor/r.js" {
+		t.Errorf("cast info = %v", d)
 	}
 	rec, _ := do(t, h, http.MethodGet, "/assets/avatars/a.zip", "")
 	if rec.Code != http.StatusOK || rec.Body.String() != "zip" {

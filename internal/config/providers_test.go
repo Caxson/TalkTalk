@@ -98,7 +98,7 @@ func TestAvatarConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Avatar.ModelPath != "" || cfg.Avatar.MouthGain != 1.6 || cfg.Avatar.AssetsDir != "assets" || cfg.Avatar.Kind != "vrm" {
+	if cfg.Avatar.ModelPath != "" || cfg.Avatar.MouthGain != 1.6 || cfg.Avatar.AssetsDir != "assets" || cfg.Avatar.Character != "" || cfg.Avatar.CastFile != "" {
 		t.Errorf("Avatar defaults = %+v", cfg.Avatar)
 	}
 	cfg, err = Load(lookupFrom(map[string]string{EnvLipsyncModel: "/m.onnx", EnvMouthGain: "2.5", EnvOnnxRuntimeLib: "/lib.so"}))
@@ -108,10 +108,7 @@ func TestAvatarConfig(t *testing.T) {
 	if _, err := Load(lookupFrom(map[string]string{EnvMouthGain: "10"})); err == nil || !strings.Contains(err.Error(), EnvMouthGain) {
 		t.Errorf("out-of-range gain accepted: %v", err)
 	}
-	if cfg, err := Load(lookupFrom(map[string]string{EnvAvatarKind: "LAM"})); err != nil || cfg.Avatar.Kind != "lam" {
-		t.Errorf("TALKTALK_AVATAR=LAM: %+v %v", cfg.Avatar, err)
-	}
-	if _, err := Load(lookupFrom(map[string]string{EnvAvatarKind: "live2d"})); err == nil || !strings.Contains(err.Error(), EnvAvatarKind) {
-		t.Errorf("unknown avatar kind accepted: %v", err)
+	if cfg, err := Load(lookupFrom(map[string]string{EnvCharacter: "Chen", EnvCastFile: "cast.json"})); err != nil || cfg.Avatar.Character != "chen" || cfg.Avatar.CastFile != "cast.json" {
+		t.Errorf("character settings: %+v %v", cfg.Avatar, err)
 	}
 }

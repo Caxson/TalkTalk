@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/Caxson/TalkTalk/internal/asr"
+	"github.com/Caxson/TalkTalk/internal/cast"
 	"github.com/Caxson/TalkTalk/internal/config"
 	"github.com/Caxson/TalkTalk/internal/dashscope"
 	"github.com/Caxson/TalkTalk/internal/dialog"
@@ -15,7 +17,7 @@ import (
 )
 
 // newSessions builds the provider clients and the session manager.
-func newSessions(cfg config.Config, logger *slog.Logger) (*session.Manager, error) {
+func newSessions(cfg config.Config, roster *cast.Cast, logger *slog.Logger) (*session.Manager, error) {
 	speechConn := dashscope.Config{APIKey: cfg.Speech.APIKey}
 
 	recognizer, err := asr.NewDashScope(asr.DashScopeConfig{
@@ -42,8 +44,14 @@ func newSessions(cfg config.Config, logger *slog.Logger) (*session.Manager, erro
 		Voice:      cfg.Speech.TTSVoice,
 		SampleRate: cfg.Speech.TTSSampleRate,
 	}
-	if _, err := tts.NewDashScope(synthCfg); err != nil {
-		return nil, err // validate once at startup, not per session
+	persona := personaOf(roster, cfg.Conversation.SystemPrompt, cfg.Speech.TTSVoice)
+	for _, ch := range roster.List() {
+		p, _ := persona(ch.ID)
+		voiced := synthCfg
+		voiced.Voice = p.Voice
+		if _, err := tts.NewDashScope(voiced); err != nil {
+			return nil, fmt.Errorf("character %s: %w", ch.ID, err) // validate once at startup, not per session
+		}
 	}
 
 	lips, err := newLips(cfg, logger)
@@ -55,7 +63,12 @@ func newSessions(cfg config.Config, logger *slog.Logger) (*session.Manager, erro
 		Lips:       lips,
 		Recognizer: recognizer,
 		LLM:        chat,
-		NewSynth:   func() (session.Synth, error) { return tts.NewDashScope(synthCfg) },
+		NewSynth: func(voice string) (session.Synth, error) {
+			voiced := synthCfg
+			voiced.Voice = voice
+			return tts.NewDashScope(voiced)
+		},
+		Persona: persona,
 		Dialog: dialog.Config{
 			SystemPrompt:      cfg.Conversation.SystemPrompt,
 			InterruptMinRunes: cfg.Conversation.InterruptMinRunes,

@@ -5,11 +5,27 @@
 #                                      (huggingface.co/myned-ai/wav2arkit_cpu)
 #   vendor/gaussian-splat-renderer-for-lam.module.js
 #                                      LAM WebGL renderer, MIT (npm)
-#   avatars/p2-1.zip                   sample avatar from aigc3d/LAM_WebRender
 #   avatars/AvatarSample_B.vrm         pixiv VRoid sample avatar (VRM 1.0); its
 #                                      license allows use as an avatar, edits
 #                                      and free redistribution, no credit needed
 #   avatars/idle_loop.vrma             idle motion from pixiv/ChatVRM (MIT)
+#   avatars/Sendagaya_Shino.vrm        pixiv VRoid beta sample, CC0 (its meta)
+#   avatars/ps_female.vrm              hinzka/52blendshapes-for-VRoid-face: a
+#                                      VRoid body with all 52 ARKit shapes
+#                                      ("Perfect Sync"); README allows use and
+#                                      adaptation, so it is fetched, never
+#                                      committed or redistributed
+#   avatars/status.zip                 LAM sample from OpenAvatarChat
+#                                      (Apache-2.0; LAM weights CC BY-NC 4.0)
+#   avatars/hiyori/...                 Live2D sample "Hiyori", Free Material
+#                                      License: small personal/indie use only,
+#                                      no redistribution, no edits to design
+#   vendor/live2d/live2dcubismcore.min.js
+#                                      Live2D Cubism Core, Live2D Proprietary
+#                                      Software License (fetched, not committed)
+#   vendor/live2d/cubism.es.js, vendor/pixi/pixi.min.mjs
+#                                      untitled-pixi-live2d-engine 1.4.0 and
+#                                      PixiJS 8.20.1 (both MIT)
 #   vendor/three/..., vendor/three-vrm*.module.min.js
 #                                      three.js 0.186.1 and @pixiv/three-vrm
 #                                      3.5.5 (both MIT) for the VRM renderer
@@ -49,14 +65,48 @@ fetch "$HF/myned-ai/wav2arkit_cpu/resolve/main/wav2arkit_cpu.onnx" \
   "$DEST/models/wav2arkit_cpu.onnx" cdecbfad3915dd20b2f0718942d0b8894b2ee11edcc5a9a9da45d29a46af2ed9
 fetch "$HF/myned-ai/wav2arkit_cpu/resolve/main/wav2arkit_cpu.onnx.data" \
   "$DEST/models/wav2arkit_cpu.onnx.data" c0f0364673c6e50be126b193e2b56809c16ac6bee4805aea9b8251ce53429bf8
-fetch "https://github.com/aigc3d/LAM_WebRender/raw/main/asset/arkit/p2-1.zip" \
-  "$DEST/avatars/p2-1.zip" 1f3fae0f9e3b137a065957f52e4761bda7f25f6531908b1bf1216e8a091097be
 
 CHATVRM="https://raw.githubusercontent.com/pixiv/ChatVRM/b542aa00e19dccf9fc48ba340cf7eee011d2329a/public"
 fetch "$CHATVRM/AvatarSample_B.vrm" \
   "$DEST/avatars/AvatarSample_B.vrm" ffbd8c92a9e67c0a948f69c7a2eec91e5c282c9ae70e9184309fc164d74cbc27
 fetch "$CHATVRM/idle_loop.vrma" \
   "$DEST/avatars/idle_loop.vrma" ace95ba6dcc0bdf2ed1081c002332b4184441117c8d543b6f642b3d2c5cf99be
+
+# Cast: more characters (see internal/cast/builtin.go).
+fetch "https://raw.githubusercontent.com/madjin/vrm-samples/e16eb187100149a315ad92c3c9968f1d5baa6c7d/vroid/beta/Sendagaya_Shino.vrm" \
+  "$DEST/avatars/Sendagaya_Shino.vrm" 1e177c1a7b14f783a9c48395831db8616260d3bddd4154cb2784b779adca49b5
+fetch "https://raw.githubusercontent.com/hinzka/52blendshapes-for-VRoid-face/756f5abab7d2295ad5b5dbc2cd86972c388c48d2/VRoid_V110_Female_v1.1.3.vrm" \
+  "$DEST/avatars/ps_female.vrm" 36d6d242999d580bd0d3bcd8656bb2d4d5d4839f187d8198226bda905e1d9114
+fetch "https://raw.githubusercontent.com/HumanAIGC-Engineering/OpenAvatarChat/8b7b3b45bca28ae9ab5fa72ee31bc03c5a99b08b/src/handlers/client/ws_lam_client/lam_samples/status.zip" \
+  "$DEST/avatars/status.zip" 59a9ff8e7dc11eacdb321726148442a31ba18ee919a8559c9a0011c169c59e65
+
+HIYORI="https://raw.githubusercontent.com/Live2D/CubismWebSamples/b1de66b0b1f1cb881d95fb6158622aeb6a2827bd/Samples/Resources/Hiyori"
+while read -r want f; do
+  fetch "$HIYORI/$f" "$DEST/avatars/hiyori/$f" "$want"
+done <<'FILES'
+973cb3392f7b01f5f73e9d3fedc495a81a0f3ee8014e5df72ef943311c56ee12 Hiyori.model3.json
+0323f5f377b9afef54318be09e9b4eea2a8cb266190ff9d2f843f95ecb77716c Hiyori.moc3
+c7a6d641893519c0bbc615545887f03f6c5b8031b4096873740b618370452fc1 Hiyori.physics3.json
+ff1cc242790f196c87a7379dc1340b608723db60af1b2825e00da8f351ffc1bf Hiyori.pose3.json
+75fe50a89ea695b46c98dce8991c2f3d67e3d7a479786e6310460289b552d29b Hiyori.userdata3.json
+0fc3fc76b7a68136056c8832c930c8af9f93899f359eded7349b481ea2342d03 Hiyori.cdi3.json
+560aea0d910dc04950d669640b2ef17c0d817969e9909f477f166bb5cbd8ffbe Hiyori.2048/texture_00.png
+87fe9ab7db81ab3025e0407229e449233581e00fa92c8e911923bc6c7d98ce84 Hiyori.2048/texture_01.png
+c4f0d982c685b81c1af0ced96c8f6bd5118b8a3fa972c3a12a46652b8d78461d motions/Hiyori_m01.motion3.json
+858c582874a0c4badfec38d4caf19e232fea5ba714f5a2ac6a282c617910c154 motions/Hiyori_m02.motion3.json
+de33a8ce78226a5ff80cfa941fb5a4c50b6c1c4b346031ed44b384f772b62cf9 motions/Hiyori_m03.motion3.json
+54ddb94d0494772e10355429c547bb7e29601f38d663087804b0c793b29cc51f motions/Hiyori_m04.motion3.json
+7f71061c9207ac1da6e06098ede9318307a7e75715a3ef97c82646acd9ee8620 motions/Hiyori_m05.motion3.json
+55c007646febe4cb76d20cbb0623086986dbb55c7ef82212693a5e26636a32ef motions/Hiyori_m06.motion3.json
+3f06cb70f5654eed3389978885e4dff151b6cf9e8d59248680addcd267ff793a motions/Hiyori_m07.motion3.json
+66022fff5cff3c30b7fc1295bf92e4975e3ab9980d5cb296b5e24a2a8acc6daf motions/Hiyori_m08.motion3.json
+9edbd6a88e977221fa90625b5f94c9fd27212e1183288105584be8272543ade7 motions/Hiyori_m09.motion3.json
+ba0ba6764a80459432ffd48d6bd5ba261fd25f196208ade3016be74efb9d3dfc motions/Hiyori_m10.motion3.json
+FILES
+# Cubism 5.2 Core: the engine reads drawables.renderOrders, which the 5.3
+# Core (the unversioned "latest" URL) moved, so the 5.2 line is pinned.
+fetch https://cubism.live2d.com/sdk-web/core/05/live2dcubismcore.min.js \
+  "$DEST/vendor/live2d/live2dcubismcore.min.js" 25ae938cb4fe282ce189b357bcc97e603d1e1f7ec78bf04150d401c23cdc792f
 
 # npm_files tarball-url "path-in-package dest sha256" ...
 # Extracts single files from an npm tarball, verifying each one.
@@ -96,6 +146,11 @@ npm_files https://registry.npmjs.org/@pixiv/three-vrm/-/three-vrm-3.5.5.tgz \
 npm_files https://registry.npmjs.org/@pixiv/three-vrm-animation/-/three-vrm-animation-3.5.5.tgz \
   "lib/three-vrm-animation.module.min.js $V/three-vrm-animation.module.min.js 31de9586a36a8ad806303b84358f11d74ce70ac1d2656b04e8a5da7a913aa907"
 
+npm_files https://registry.npmjs.org/untitled-pixi-live2d-engine/-/untitled-pixi-live2d-engine-1.4.0.tgz \
+  "dist/cubism.es.js $V/live2d/cubism.es.js 4afe8c561d06b6f5c3bd5b4eeb67362cf54e3c12b5e84433e16429dde3159091"
+npm_files https://registry.npmjs.org/pixi.js/-/pixi.js-8.20.1.tgz \
+  "dist/pixi.min.mjs $V/pixi/pixi.min.mjs efc469a3839f80d6b55f8041c498e84fa271991166d45f37c9d8511f914a65f4"
+
 MP="$V/mediapipe"
 npm_files https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.1.0.tgz \
   "vision_bundle.mjs $MP/vision_bundle.mjs 9d5fc9ef74b22329cf9aa88dc543956d192b8c254210b187271614713eb5b10c" \
@@ -124,6 +179,8 @@ else
   rm -rf "$tmp"
 fi
 
-echo
-echo "Add to .env:"
-echo "  TALKTALK_LIPSYNC_MODEL=$DEST/models/wav2arkit_cpu.onnx"
+if ! grep -qs '^TALKTALK_LIPSYNC_MODEL=' .env; then
+  echo
+  echo "Add to .env:"
+  echo "  TALKTALK_LIPSYNC_MODEL=$DEST/models/wav2arkit_cpu.onnx"
+fi
