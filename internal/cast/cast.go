@@ -44,8 +44,11 @@ type Character struct {
 	Kind      string `json:"kind"`
 	Model     string `json:"model"`               // avatar file, relative to the assets dir
 	Animation string `json:"animation,omitempty"` // idle motion (VRM)
-	Voice     string `json:"voice,omitempty"`     // TTS voice id ("" = the configured default)
-	Persona   string `json:"persona,omitempty"`   // appended to the system prompt
+	// Background, for a photoreal head (LAM), is the photo it was made
+	// from: it supplies hair, body and room, and the head is fitted onto it.
+	Background string `json:"background,omitempty"`
+	Voice      string `json:"voice,omitempty"`   // TTS voice id ("" = the configured default)
+	Persona    string `json:"persona,omitempty"` // appended to the system prompt
 	// Credit is shown with the avatar when its license asks for one.
 	Credit string `json:"credit,omitempty"`
 }
@@ -72,7 +75,7 @@ func (c Character) validate() error {
 	if c.Model == "" {
 		return fmt.Errorf("%s: model is required", c.ID)
 	}
-	for _, p := range []string{c.Model, c.Animation} {
+	for _, p := range []string{c.Model, c.Animation, c.Background} {
 		if p != "" && !isLocalPath(p) {
 			return fmt.Errorf("%s: asset path %q must be a clean relative path under avatars/ or vendor/", c.ID, p)
 		}
@@ -134,7 +137,7 @@ func New(chars []Character, def string, exists Exists) (*Cast, error) {
 	}
 	cs := &Cast{}
 	for _, c := range chars {
-		if exists == nil || present(exists, append([]string{c.Model, c.Animation}, runtime[c.Kind]...)) {
+		if exists == nil || present(exists, append([]string{c.Model, c.Animation, c.Background}, runtime[c.Kind]...)) {
 			cs.chars = append(cs.chars, c)
 		}
 	}
