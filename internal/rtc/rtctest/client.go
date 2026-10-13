@@ -18,6 +18,7 @@ import (
 // downlink audio.
 type Client struct {
 	PC       *webrtc.PeerConnection
+	DC       *webrtc.DataChannel // events channel
 	mic      *webrtc.TrackLocalStaticSample
 	enc      *audio.OpusEncoder
 	Events   chan map[string]any
@@ -64,6 +65,7 @@ func New(t testing.TB) *Client {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.DC = dc
 	dc.OnOpen(func() { close(c.DCOpened) })
 	dc.OnMessage(func(m webrtc.DataChannelMessage) {
 		var v map[string]any

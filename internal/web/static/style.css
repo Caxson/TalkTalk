@@ -94,6 +94,8 @@ body.avatar-lam .still-canvas { width: 160%; height: 160%; left: -30%; top: -32%
 .tl-meta { top: 12px; left: 30px; }
 .tr-meta { top: 12px; right: 30px; }
 .bl-meta { bottom: 12px; left: 30px; }
+.br-meta { bottom: 12px; right: 30px; }
+.br-meta[data-on="true"] { color: var(--ink); }
 .still-load { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
 .stage[data-state="speaking"] .corner, .stage[data-state="yielding"] .corner { border-color: var(--tally); }
 /* With the avatar on stage, the state word is a caption, not a headline. */

@@ -115,6 +115,23 @@ func avatarInfo(cfg config.Config, logger *slog.Logger) *server.AvatarInfo {
 			*p = "/assets/" + *p
 		}
 	}
+	info.Perception = perceptionInfo(cfg, logger)
 	logger.Info("avatar enabled", "kind", info.Kind, "model", info.Model)
 	return info
+}
+
+// perceptionInfo enables in-browser face reading when MediaPipe is present.
+func perceptionInfo(cfg config.Config, logger *slog.Logger) *server.PerceptionInfo {
+	const dir = "vendor/mediapipe"
+	for _, f := range []string{"vision_bundle.mjs", "wasm/vision_wasm_internal.wasm", "face_landmarker.task"} {
+		if _, err := os.Stat(filepath.Join(cfg.Avatar.AssetsDir, dir, f)); err != nil {
+			logger.Info("perception disabled: MediaPipe assets missing, run make assets", "file", f)
+			return nil
+		}
+	}
+	return &server.PerceptionInfo{
+		Bundle: "/assets/" + dir + "/vision_bundle.mjs",
+		Wasm:   "/assets/" + dir + "/wasm",
+		Model:  "/assets/" + dir + "/face_landmarker.task",
+	}
 }

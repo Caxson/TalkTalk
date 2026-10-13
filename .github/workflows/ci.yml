@@ -30,5 +30,10 @@ jobs:
         run: make lint
       - name: test
         run: make cover
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: test web client
+        run: make test-web
       - name: build
         run: make build

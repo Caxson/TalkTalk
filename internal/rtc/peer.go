@@ -20,6 +20,8 @@ import (
 const (
 	gatherTimeout   = 5 * time.Second
 	pendingMessages = 64
+	// maxClientMessage bounds what a client may send per message.
+	maxClientMessage = 1024
 	// EventsLabel is the data channel the client opens for events.
 	EventsLabel = "events"
 	// MotionLabel is the client's unordered, no-retransmit channel for
@@ -36,7 +38,10 @@ type Config struct {
 	OnAudio func(pcm []int16)
 	// OnClose fires once when the connection fails or closes.
 	OnClose func()
-	Logger  *slog.Logger
+	// OnMessage receives text messages the client sends on the events
+	// channel (e.g. camera readings). Optional.
+	OnMessage func(msg []byte)
+	Logger    *slog.Logger
 }
 
 // Peer is one browser connection.
@@ -196,6 +201,13 @@ func (p *Peer) onDataChannel(dc *webrtc.DataChannel) {
 	}
 	if dc.Label() != EventsLabel {
 		return
+	}
+	if p.cfg.OnMessage != nil {
+		dc.OnMessage(func(m webrtc.DataChannelMessage) {
+			if m.IsString && len(m.Data) <= maxClientMessage {
+				p.cfg.OnMessage(m.Data)
+			}
+		})
 	}
 	dc.OnOpen(func() {
 		p.mu.Lock()

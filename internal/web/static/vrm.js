@@ -10,7 +10,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 // Head-and-shoulders still: at 22° the frame spans ~0.43 m vertically at
 // 1.1 m, from the top of the hair (head bone + ~0.2 m) to the chest.
 const FRAMING = { fov: 22, distance: 1.1, above: 0.02, aim: 0.02 }; // metres around the head bone
-const LOOK = { contact: 0.0, drift: 0.035, thinkUp: 0.18, thinkSide: 0.12 };
+const LOOK = { drift: 0.035, thinkUp: 0.18, thinkSide: 0.12, follow: 0.28 }; // metres at the camera
 
 // clamp01((x - 0.15) / 0.45): VMagicMirror's dead zone and full-scale.
 const mapClamp = (x) => Math.min(1, Math.max(0, (x - 0.15) / 0.45));
@@ -90,10 +90,17 @@ export async function mount(avatar, info) {
   resize();
 
   const em = vrm.expressionManager;
+  const head = vrm.humanoid.getNormalizedBoneNode("head");
+  // Behavior offsets on the head, as applied last frame. They are taken
+  // off before the animation updates and put back after, so they never
+  // accumulate, whether or not the idle clip animates the head.
+  const applied = { pitch: 0, yaw: 0 };
   const clock = new THREE.Clock();
   const draw = () => {
     const dt = Math.min(clock.getDelta(), 0.1);
     const e = avatar.expression();
+    const b = avatar.act();
+    em.setValue("relaxed", Math.min(1, b.smile * 0.85));
     const v = vowels(e);
     em.setValue("aa", v.aa);
     em.setValue("ih", v.ih);
@@ -104,17 +111,27 @@ export async function mount(avatar, info) {
 
     const now = performance.now();
     if (now > nextSaccade) {
-      saccade.set((Math.random() - 0.5) * 2 * LOOK.drift, (Math.random() - 0.5) * LOOK.drift);
+      const k = LOOK.drift * b.saccadeScale;
+      saccade.set((Math.random() - 0.5) * 2 * k, (Math.random() - 0.5) * k);
       nextSaccade = now + 900 + Math.random() * 2200;
     }
     const thinking = avatar.state === "thinking";
     gaze.position.set(
-      camera.position.x + saccade.x + (thinking ? LOOK.thinkSide : 0),
-      camera.position.y + saccade.y + (thinking ? LOOK.thinkUp : 0),
+      camera.position.x + saccade.x + b.gaze.x * LOOK.follow + (thinking ? LOOK.thinkSide : 0),
+      camera.position.y + saccade.y + b.gaze.y * LOOK.follow * 0.6 + (thinking ? LOOK.thinkUp : 0),
       camera.position.z,
     );
 
+    head.rotation.x -= applied.pitch;
+    head.rotation.y -= applied.yaw;
     mixer.update(dt);
+    // Behavior rides on top of the idle animation: nod, and turn the head
+    // a little toward the person (the eyes do most of the following).
+    applied.pitch = b.nod;
+    applied.yaw = b.gaze.x * 0.12;
+    head.rotation.x += applied.pitch;
+    head.rotation.y += applied.yaw;
+    avatar.headYaw = head.rotation.y;
     vrm.update(dt);
     renderer.render(scene, camera);
     requestAnimationFrame(draw);

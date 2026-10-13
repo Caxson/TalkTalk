@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ func TestPeerAudioBothWaysAndEvents(t *testing.T) {
 	var mu sync.Mutex
 	var received []int16
 	closed := make(chan struct{})
+	msgs := make(chan string, 4)
 	peer, answer, err := Answer(context.Background(), c.Offer(t), Config{
 		InputSampleRate: 16000,
 		OnAudio: func(pcm []int16) {
@@ -28,8 +30,9 @@ func TestPeerAudioBothWaysAndEvents(t *testing.T) {
 			received = append(received, pcm...)
 			mu.Unlock()
 		},
-		OnClose: func() { close(closed) },
-		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		OnClose:   func() { close(closed) },
+		OnMessage: func(b []byte) { msgs <- string(b) },
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +53,21 @@ func TestPeerAudioBothWaysAndEvents(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("queued event not delivered")
+	}
+
+	// Client → server messages, with an oversized one dropped.
+	c.DC.SendText(`{"type":"perception","face":true,"mouth":false}`)
+	c.DC.SendText(strings.Repeat("x", 2000))
+	c.DC.SendText(`{"type":"ping"}`)
+	for _, want := range []string{`{"type":"perception","face":true,"mouth":false}`, `{"type":"ping"}`} {
+		select {
+		case m := <-msgs:
+			if m != want {
+				t.Errorf("client message = %.40q, want %q", m, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("client message not delivered")
+		}
 	}
 
 	// Uplink: 1s of a 440 Hz tone from the "browser" microphone.

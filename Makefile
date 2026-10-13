@@ -45,8 +45,12 @@ vet: ## Run go vet
 lint: ## Run staticcheck
 	GOTOOLCHAIN=$$(go env GOVERSION) go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) ./...
 
+.PHONY: test-web
+test-web: ## Run the browser client's unit tests (Node 20+)
+	node --test internal/web/static/test/*.test.mjs
+
 .PHONY: check
-check: fmt-check vet lint test ## Everything CI runs
+check: fmt-check vet lint test test-web ## Everything CI runs
 
 .PHONY: assets
 assets: ## Download the lip-sync model, avatar renderer and sample avatar

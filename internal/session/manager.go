@@ -4,6 +4,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -183,6 +184,7 @@ func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDesc
 		ICEServers:      m.d.ICEServers,
 		InputSampleRate: m.d.Recognizer.SampleRate(),
 		OnAudio:         func(pcm []int16) { engine.PushAudio(runCtx, pcm) },
+		OnMessage:       func(msg []byte) { onClientMessage(engine, msg) },
 		OnClose:         cancel,
 		Logger:          log,
 	})
@@ -277,4 +279,23 @@ func (m *Manager) Start(ctx context.Context, offer webrtc.SessionDescription) (s
 		return "", webrtc.SessionDescription{}, err
 	}
 	return s.ID, answer, nil
+}
+
+// clientMessage is what the browser may send on the events channel.
+type clientMessage struct {
+	Type string `json:"type"`
+	// perception: a camera reading, computed in the browser.
+	Face  bool `json:"face"`
+	Mouth bool `json:"mouth"`
+}
+
+func onClientMessage(engine *dialog.Engine, raw []byte) {
+	var m clientMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return
+	}
+	switch m.Type {
+	case "perception":
+		engine.SetVisual(dialog.Visual{FacePresent: m.Face, MouthActive: m.Mouth})
+	}
 }

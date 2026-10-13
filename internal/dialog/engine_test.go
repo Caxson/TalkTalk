@@ -705,11 +705,12 @@ func TestBackchannelWhileYieldingResumes(t *testing.T) {
 	h.waitFor("resume", func(e Event) bool { return e.Type == "resume" })
 }
 
-func TestOneWordConfirmsWhenVoiceAgrees(t *testing.T) {
+func TestOneWordConfirmsWhenVoiceAndCameraAgree(t *testing.T) {
 	h := newSoftHarness(t, longReply, "好的我停下。")
 	h.quiet(200 * time.Millisecond)
 	h.say("说吧", true)
 	h.waitState(StateSpeaking)
+	defer h.holdVisual(func() Visual { return Visual{FacePresent: true, MouthActive: true} })()
 	go h.talk(800 * time.Millisecond)
 	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
 	time.Sleep(350 * time.Millisecond) // sustained voice
@@ -862,4 +863,208 @@ func TestLipFailureKeepsTalking(t *testing.T) {
 	if hist := texts(h.stop()); len(hist) != 2 || hist[1] != "assistant:口型坏了也要把话说完。" {
 		t.Errorf("history = %q", hist)
 	}
+}
+
+// ---- visual echo veto ----
+
+func TestClosedMouthOnCameraVetoesYieldAndBargeIn(t *testing.T) {
+	h := newSoftHarness(t, longReply)
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+
+	// The user is on camera with a closed mouth: what the mic hears is echo.
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			h.eng.SetVisual(Visual{FacePresent: true, MouthActive: false})
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	defer close(stop)
+	h.talk(500 * time.Millisecond) // loud "voice" = residual echo
+	h.say("我是谁", false)            // echo transcribed as words
+	h.waitState(StateListening)    // the reply ran to its natural end
+	hist := texts(h.stop())
+	if strings.Contains(hist[len(hist)-1], "打断") {
+		t.Errorf("echo interrupted the reply: %q", hist)
+	}
+}
+
+func TestSpeakingOnCameraStillInterrupts(t *testing.T) {
+	h := newSoftHarness(t, longReply, "好。")
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	go func() {
+		for i := 0; i < 30; i++ {
+			h.eng.SetVisual(Visual{FacePresent: true, MouthActive: true})
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	go h.talk(600 * time.Millisecond)
+	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
+	h.say("等一下", false)
+	h.waitFor("interrupted", func(e Event) bool { return e.Type == "interrupted" })
+}
+
+func TestStaleOrAbsentVisualDoesNotVeto(t *testing.T) {
+	h := newSoftHarness(t, longReply, "好。")
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	// A closed-mouth reading that is too old to trust, and one with
+	// nobody on camera: neither may block a real interruption.
+	h.eng.SetVisual(Visual{FacePresent: true, MouthActive: false})
+	time.Sleep(700 * time.Millisecond)
+	h.eng.SetVisual(Visual{FacePresent: false})
+	go h.talk(600 * time.Millisecond)
+	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
+	h.say("等一下", false)
+	h.waitFor("interrupted", func(e Event) bool { return e.Type == "interrupted" })
+}
+
+// holdVisual keeps sending a camera reading until the returned func is called.
+func (h *harness) holdVisual(v func() Visual) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			h.eng.SetVisual(v())
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	return func() { close(done) }
+}
+
+func TestLongSpeechInterruptsDespiteStillMouthReading(t *testing.T) {
+	// Profile, a mask or a frozen camera can read "mouth still" while the
+	// user really talks: a long utterance must still get through.
+	h := newSoftHarness(t, longReply, "好的。")
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	defer h.holdVisual(func() Visual { return Visual{FacePresent: true, MouthActive: false} })()
+	h.talk(1200 * time.Millisecond)
+	h.say("我不想听这个了我们换个话题聊聊周末去哪", false)
+	h.waitFor("interrupted", func(e Event) bool { return e.Type == "interrupted" })
+}
+
+func TestVetoedOnsetYieldsOnceTheMouthIsSeenMoving(t *testing.T) {
+	h := newSoftHarness(t, longReply)
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	var mu sync.Mutex
+	moving := false
+	defer h.holdVisual(func() Visual { mu.Lock(); defer mu.Unlock(); return Visual{FacePresent: true, MouthActive: moving} })()
+	time.Sleep(120 * time.Millisecond)
+	go h.talk(900 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond) // the camera catches up after the sound
+	mu.Lock()
+	moving = true
+	mu.Unlock()
+	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
+}
+
+func TestOwnWordsHeardBackAreEchoWithoutACamera(t *testing.T) {
+	h := newSoftHarness(t, longReply)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	h.waitFor("segment", func(e Event) bool { return e.Type == "assistant" })
+	// The recognizer transcribes the assistant's own voice from the speakers,
+	// following it as it plays.
+	h.say("这是一个很长很长的回答", false)
+	h.waitFor("second segment", func(e Event) bool { return e.Type == "assistant" })
+	h.say("这是一个很长很长的回答，会说上好一阵子", true)
+	h.waitState(StateListening)
+	if hist := texts(h.stop()); strings.Contains(hist[len(hist)-1], "打断") || len(hist) != 2 {
+		t.Errorf("own words heard back interrupted the reply: %q", hist)
+	}
+}
+
+func TestEchoSimilarity(t *testing.T) {
+	const said = "好的，这是一个很长的回答，会说上一阵子。"
+	cases := []struct {
+		heard, recent string
+		echo          bool
+	}{
+		{"这是一个很长的回答", said, true},
+		{"等一下我想换个话题", said, false},
+		{"嗨，你", "嗨你好呀。", true},    // a short fragment of what was just said
+		{"呃你好。", "嗨你好呀。", true},   // fillers do not hide it
+		{"等等", "嗨你好呀。", false},    // short, but not what was said
+		{"回答", "完全不同的一句。", false}, // in the turn, but not recent
+		{"你", "你好", false},        // one character judges nothing
+		{"", said, false},
+	}
+	for _, c := range cases {
+		if got := soundsLikeOwnWords(c.heard, c.recent, said); got != c.echo {
+			t.Errorf("soundsLikeOwnWords(%q, recent %q) = %v, want %v", c.heard, c.recent, got, c.echo)
+		}
+	}
+}
+
+func TestOneWordWithSustainedSoundButNoCameraDoesNotInterrupt(t *testing.T) {
+	// Residual echo is sustained sound: without the camera seeing a moving
+	// mouth, one character is not enough.
+	h := newSoftHarness(t, longReply)
+	h.quiet(200 * time.Millisecond)
+	h.say("说吧", true)
+	h.waitState(StateSpeaking)
+	go h.talk(800 * time.Millisecond)
+	h.waitFor("yield", func(e Event) bool { return e.Type == "yield" })
+	time.Sleep(350 * time.Millisecond)
+	h.say("Hi", false)
+	h.waitState(StateListening)
+	if hist := texts(h.stop()); strings.Contains(hist[len(hist)-1], "打断") {
+		t.Errorf("one word over sustained sound without a camera interrupted: %q", hist)
+	}
+}
+
+func TestSubstantiveUnits(t *testing.T) {
+	for text, want := range map[string]int{
+		"Hi": 1, "Hi there": 2, "嗨": 1, "我是talk talk。": 4, "嗯嗯": 0, "停": 1, "3.5 度": 3, "": 0,
+	} {
+		if got := substantive(text); got != want {
+			t.Errorf("substantive(%q) = %d, want %d", text, got, want)
+		}
+	}
+}
+
+func TestEchoOfLastSentenceAfterReplyEndsIsNotANewTurn(t *testing.T) {
+	h := newHarness(t, time.Millisecond, "你好呀。你想说什么呢？", "不该出现。")
+	h.say("你好", true)
+	h.waitState(StateSpeaking)
+	h.waitState(StateListening)
+	// The recognizer's final for the last sentence arrives after the reply
+	// has finished playing.
+	h.say("想说什么呢", false)
+	h.say("想说什么呢？", true)
+	time.Sleep(200 * time.Millisecond)
+	if n := h.llm.count(); n != 1 {
+		t.Errorf("the assistant answered its own echo: %d LLM calls", n)
+	}
+	// A real answer right after is still heard.
+	h.say("我想聊聊旅行", true)
+	h.waitFor("turn", func(e Event) bool { return e.Type == "turn" && e.Text == "我想聊聊旅行" })
+}
+
+func TestEchoTailExpires(t *testing.T) {
+	h := newHarnessWith(t, func(c *Config) { c.EchoTail = 150 * time.Millisecond }, time.Millisecond, "你好呀。", "好的。")
+	h.say("你好", true)
+	h.waitState(StateSpeaking)
+	h.waitState(StateListening)
+	time.Sleep(300 * time.Millisecond)
+	h.say("你好呀", true) // long after: the user may well say it
+	h.waitFor("turn", func(e Event) bool { return e.Type == "turn" && e.Text == "你好呀" })
 }
