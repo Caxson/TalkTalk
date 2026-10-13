@@ -87,7 +87,7 @@ func newManager(t *testing.T, max int) (*Manager, *[]*toneSynth) {
 	m, err := NewManager(Deps{
 		Recognizer: heardRecognizer{},
 		LLM:        replyLLM{},
-		NewSynth: func() (Synth, error) {
+		NewSynth: func(string) (Synth, error) {
 			s := &toneSynth{}
 			mu.Lock()
 			*synths = append(*synths, s)
@@ -127,7 +127,7 @@ func waitEvent(t *testing.T, c *rtctest.Client, pred func(map[string]any) bool) 
 func TestSessionRunsAConversationOverWebRTC(t *testing.T) {
 	m, synths := newManager(t, 2)
 	c := rtctest.New(t)
-	s, answer, err := m.Create(context.Background(), c.Offer(t))
+	s, answer, err := m.Create(context.Background(), c.Offer(t), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,11 +162,11 @@ func TestSessionRunsAConversationOverWebRTC(t *testing.T) {
 func TestCapacityLimit(t *testing.T) {
 	m, _ := newManager(t, 1)
 	c1 := rtctest.New(t)
-	if _, _, err := m.Create(context.Background(), c1.Offer(t)); err != nil {
+	if _, _, err := m.Create(context.Background(), c1.Offer(t), ""); err != nil {
 		t.Fatal(err)
 	}
 	c2 := rtctest.New(t)
-	if _, _, err := m.Create(context.Background(), c2.Offer(t)); !errors.Is(err, ErrCapacity) {
+	if _, _, err := m.Create(context.Background(), c2.Offer(t), ""); !errors.Is(err, ErrCapacity) {
 		t.Errorf("second Create err = %v, want ErrCapacity", err)
 	}
 }
@@ -174,7 +174,7 @@ func TestCapacityLimit(t *testing.T) {
 func TestClientHangupEndsSession(t *testing.T) {
 	m, _ := newManager(t, 1)
 	c := rtctest.New(t)
-	s, answer, err := m.Create(context.Background(), c.Offer(t))
+	s, answer, err := m.Create(context.Background(), c.Offer(t), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestBadOfferReleasesSlot(t *testing.T) {
 	c := rtctest.New(t)
 	offer := c.Offer(t)
 	offer.SDP = "garbage"
-	if _, _, err := m.Create(context.Background(), offer); err == nil {
+	if _, _, err := m.Create(context.Background(), offer, ""); err == nil {
 		t.Fatal("Create accepted garbage SDP")
 	}
 	if m.Count() != 0 {
@@ -211,7 +211,7 @@ func TestCloseAllRefusesNewSessions(t *testing.T) {
 	m, _ := newManager(t, 2)
 	m.CloseAll(context.Background())
 	c := rtctest.New(t)
-	if _, _, err := m.Create(context.Background(), c.Offer(t)); err == nil {
+	if _, _, err := m.Create(context.Background(), c.Offer(t), ""); err == nil {
 		t.Error("Create succeeded after CloseAll")
 	}
 }
@@ -221,7 +221,7 @@ func TestTeardownBeforeRegistrationFreesSlot(t *testing.T) {
 	c := rtctest.New(t)
 	offer := c.Offer(t)
 	c.PC.Close() // the client is gone before the answer is even applied
-	s, _, err := m.Create(context.Background(), offer)
+	s, _, err := m.Create(context.Background(), offer, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestTeardownBeforeRegistrationFreesSlot(t *testing.T) {
 		t.Fatalf("slot leaked: Count = %d", m.Count())
 	}
 	c2 := rtctest.New(t)
-	if _, _, err := m.Create(context.Background(), c2.Offer(t)); err != nil {
+	if _, _, err := m.Create(context.Background(), c2.Offer(t), ""); err != nil {
 		t.Errorf("capacity not restored: %v", err)
 	}
 }
@@ -253,5 +253,84 @@ func TestReleaseIgnoresOtherOwner(t *testing.T) {
 	m.release("x", other)
 	if m.Count() != 0 {
 		t.Errorf("Count = %d, want 0", m.Count())
+	}
+}
+
+// promptLLM records the system prompt it was given.
+type promptLLM struct{ got chan string }
+
+func (l promptLLM) Stream(_ context.Context, msgs []llm.Message) iter.Seq2[string, error] {
+	if len(msgs) > 0 && msgs[0].Role == llm.RoleSystem {
+		select {
+		case l.got <- msgs[0].Content:
+		default:
+		}
+	}
+	return replyLLM{}.Stream(context.Background(), msgs)
+}
+
+func TestSessionUsesTheChosenCharacter(t *testing.T) {
+	voices := make(chan string, 4)
+	prompts := promptLLM{got: make(chan string, 4)}
+	m, err := NewManager(Deps{
+		Recognizer: heardRecognizer{},
+		LLM:        prompts,
+		NewSynth: func(voice string) (Synth, error) {
+			voices <- voice
+			return &toneSynth{}, nil
+		},
+		Dialog: dialog.Config{SystemPrompt: "SYS"},
+		Persona: func(id string) (Persona, error) {
+			switch id {
+			case "", "mio":
+				return Persona{Voice: "v-mio", SystemPrompt: "SYS mio"}, nil
+			}
+			return Persona{}, ErrUnknownCharacter
+		},
+		Max:    1,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		m.CloseAll(ctx)
+	})
+
+	if _, _, err := m.Create(context.Background(), rtctest.New(t).Offer(t), "ghost"); !errors.Is(err, ErrUnknownCharacter) {
+		t.Fatalf("unknown character: err = %v", err)
+	}
+	if m.Count() != 0 {
+		t.Fatalf("unknown character held a slot: Count = %d", m.Count())
+	}
+
+	c := rtctest.New(t)
+	_, answer, err := m.Create(context.Background(), c.Offer(t), "mio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := <-voices; v != "v-mio" {
+		t.Errorf("synth voice = %q, want v-mio", v)
+	}
+	c.Accept(t, answer)
+	<-c.DCOpened
+	go c.Speak(make([]int16, 48000))
+	select {
+	case p := <-prompts.got:
+		if p != "SYS mio" {
+			t.Errorf("system prompt = %q, want the character's", p)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("LLM never called")
+	}
+}
+
+func TestNoCastRejectsNamedCharacters(t *testing.T) {
+	m, _ := newManager(t, 1)
+	c := rtctest.New(t)
+	if _, _, err := m.Create(context.Background(), c.Offer(t), "mio"); !errors.Is(err, ErrUnknownCharacter) {
+		t.Errorf("err = %v, want ErrUnknownCharacter", err)
 	}
 }

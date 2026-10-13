@@ -7,7 +7,7 @@
   <link rel="preload" href="fonts/InstrumentSerif-400-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
   <!-- Resolves bare imports of the self-hosted three.js (make assets). -->
-  <script type="importmap">{"imports": {"three": "/assets/vendor/three/three.module.js", "three/addons/": "/assets/vendor/three/addons/"}}</script>
+  <script type="importmap">{"imports": {"three": "/assets/vendor/three/three.module.js", "three/addons/": "/assets/vendor/three/addons/", "pixi.js": "/assets/vendor/pixi/pixi.min.mjs"}}</script>
 </head>
 <body>
   <header class="masthead">
@@ -31,6 +31,7 @@
           <span class="still-meta br-meta" id="still-cam">cam off</span>
           <span class="still-load" id="still-load">loading avatar · 0%</span>
         </div>
+        <figcaption class="still-credit" id="still-credit" hidden></figcaption>
       </figure>
       <div class="label state-label">State</div>
       <h1 class="state" id="state-word">standby.</h1>
@@ -46,6 +47,14 @@
           <dd class="ticks" id="meter-voice" data-active="false"></dd>
         </div>
       </dl>
+
+      <nav class="cast" id="cast" aria-label="Cast" hidden>
+        <div class="section-head">
+          <span class="label">Cast · 选角</span>
+          <span class="label dim" id="cast-count">00</span>
+        </div>
+        <ol class="cast-list" id="cast-list"></ol>
+      </nav>
 
       <div class="controls">
         <button class="call" id="call" type="button">

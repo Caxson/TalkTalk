@@ -32,19 +32,30 @@ type Options struct {
 	Static          fs.FS
 	// Assets serves downloaded client assets under /assets/ (nil: none).
 	Assets fs.FS
-	// Avatar describes the browser avatar; nil disables it.
-	Avatar *AvatarInfo
+	// Cast lists the characters a conversation can be held with; nil
+	// means a single unnamed assistant without an avatar.
+	Cast *CastInfo
 }
 
-// AvatarInfo tells the client which avatar renderer to use and where its
-// files are.
-type AvatarInfo struct {
-	Kind      string `json:"kind"`                // "vrm" | "lam"
-	Renderer  string `json:"renderer"`            // ES module URL of the renderer library
-	Model     string `json:"model"`               // avatar file URL (.vrm or LAM .zip)
-	Animation string `json:"animation,omitempty"` // idle motion (.vrma), VRM only
+// CastInfo is what GET /api/characters returns.
+type CastInfo struct {
+	Default    string          `json:"default"`
+	Characters []CharacterInfo `json:"characters"`
 	// Perception, if set, lets the browser read the user's face (locally).
 	Perception *PerceptionInfo `json:"perception,omitempty"`
+}
+
+// CharacterInfo describes one character and, when avatars are enabled,
+// which renderer draws it and where its files are.
+type CharacterInfo struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Tagline   string `json:"tagline,omitempty"`
+	Kind      string `json:"kind"`                // "vrm" | "lam" | "live2d"
+	Renderer  string `json:"renderer,omitempty"`  // ES module URL of the renderer library
+	Model     string `json:"model,omitempty"`     // avatar file URL
+	Animation string `json:"animation,omitempty"` // idle motion (.vrma), VRM only
+	Credit    string `json:"credit,omitempty"`    // attribution the avatar's license requires
 }
 
 // PerceptionInfo locates MediaPipe's face landmarker for the browser.
@@ -76,7 +87,7 @@ func New(opts Options) *Server {
 		mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
 		mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	}
-	mux.HandleFunc("GET /api/avatar", s.handleAvatar)
+	mux.HandleFunc("GET /api/characters", s.handleCharacters)
 	if opts.Assets != nil {
 		assets := http.StripPrefix("/assets/", http.FileServerFS(opts.Assets))
 		mux.Handle("GET /assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,15 +147,12 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	return nil
 }
 
-func (s *Server) handleAvatar(w http.ResponseWriter, _ *http.Request) {
-	if s.opts.Avatar == nil {
-		httpx.WriteOK(w, map[string]bool{"enabled": false})
+func (s *Server) handleCharacters(w http.ResponseWriter, _ *http.Request) {
+	if s.opts.Cast == nil {
+		httpx.WriteOK(w, CastInfo{Characters: []CharacterInfo{}})
 		return
 	}
-	httpx.WriteOK(w, struct {
-		Enabled bool `json:"enabled"`
-		*AvatarInfo
-	}{true, s.opts.Avatar})
+	httpx.WriteOK(w, s.opts.Cast)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {

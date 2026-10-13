@@ -27,9 +27,20 @@ import (
 // ErrCapacity is returned when the session limit is reached.
 var ErrCapacity = errors.New("session: too many active sessions")
 
-// SynthFactory builds a per-session synthesizer; it may hold a warm
-// provider connection, so it is closed with the session.
-type SynthFactory func() (Synth, error)
+// ErrUnknownCharacter is returned for a character that is not in the cast.
+var ErrUnknownCharacter = errors.New("session: unknown character")
+
+// SynthFactory builds a per-session synthesizer speaking with voice (empty:
+// the provider default); it may hold a warm provider connection, so it is
+// closed with the session.
+type SynthFactory func(voice string) (Synth, error)
+
+// Persona is who the assistant is in one session.
+type Persona struct {
+	Character    string // id, for logs
+	Voice        string
+	SystemPrompt string
+}
 
 // Synth is a synthesizer with a lifecycle.
 type Synth interface {
@@ -44,6 +55,10 @@ type Deps struct {
 	LLM        llm.Streamer
 	NewSynth   SynthFactory
 	Dialog     dialog.Config
+	// Persona resolves a requested character ("" = default). It returns
+	// ErrUnknownCharacter for ids it does not know. Nil: everyone gets
+	// Dialog.SystemPrompt and the default voice.
+	Persona func(character string) (Persona, error)
 	// Lips enables avatar motion; nil means audio only.
 	Lips       func(sampleRate int) (dialog.LipStream, error)
 	ICEServers []string
@@ -91,13 +106,18 @@ func (m *Manager) Count() int {
 	return len(m.sessions)
 }
 
-// Create answers the client's offer and starts the conversation.
-func (m *Manager) Create(ctx context.Context, offer webrtc.SessionDescription) (*Session, webrtc.SessionDescription, error) {
+// Create answers the client's offer and starts a conversation with the
+// given character ("" = default).
+func (m *Manager) Create(ctx context.Context, offer webrtc.SessionDescription, character string) (*Session, webrtc.SessionDescription, error) {
+	persona, err := m.persona(character)
+	if err != nil {
+		return nil, webrtc.SessionDescription{}, err
+	}
 	id := uuid.NewString()
 	if err := m.reserve(id); err != nil {
 		return nil, webrtc.SessionDescription{}, err
 	}
-	s, answer, err := m.start(ctx, id, offer)
+	s, answer, err := m.start(ctx, id, offer, persona)
 	if err != nil {
 		m.release(id, nil)
 		return nil, webrtc.SessionDescription{}, err
@@ -115,6 +135,16 @@ func (m *Manager) Create(ctx context.Context, offer webrtc.SessionDescription) (
 		s.cancel()
 	}
 	return s, answer, nil
+}
+
+func (m *Manager) persona(character string) (Persona, error) {
+	if m.d.Persona == nil {
+		if character != "" {
+			return Persona{}, fmt.Errorf("%w: %q", ErrUnknownCharacter, character)
+		}
+		return Persona{SystemPrompt: m.d.Dialog.SystemPrompt}, nil
+	}
+	return m.d.Persona(character)
 }
 
 func (m *Manager) reserve(id string) error {
@@ -139,9 +169,9 @@ func (m *Manager) release(id string, s *Session) {
 	}
 }
 
-func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDescription) (*Session, webrtc.SessionDescription, error) {
+func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDescription, persona Persona) (*Session, webrtc.SessionDescription, error) {
 	log := m.d.Logger.With("session", id)
-	synth, err := m.d.NewSynth()
+	synth, err := m.d.NewSynth(persona.Voice)
 	if err != nil {
 		return nil, webrtc.SessionDescription{}, fmt.Errorf("session: synth: %w", err)
 	}
@@ -161,7 +191,9 @@ func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDesc
 		synth.Close()
 		return nil, webrtc.SessionDescription{}, err
 	}
-	engine, err := dialog.New(m.d.Dialog, dialog.Deps{
+	dcfg := m.d.Dialog
+	dcfg.SystemPrompt = persona.SystemPrompt
+	engine, err := dialog.New(dcfg, dialog.Deps{
 		Recognizer: m.d.Recognizer,
 		LLM:        m.d.LLM,
 		TTS:        synth,
@@ -232,7 +264,7 @@ func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDesc
 		log.Info("session closed")
 		close(s.done)
 	}()
-	log.Info("session started")
+	log.Info("session started", "character", persona.Character, "voice", persona.Voice)
 	return s, answer, nil
 }
 
@@ -273,8 +305,8 @@ func (m *Manager) CloseAll(ctx context.Context) {
 }
 
 // Start is Create returning only the session id, for the HTTP layer.
-func (m *Manager) Start(ctx context.Context, offer webrtc.SessionDescription) (string, webrtc.SessionDescription, error) {
-	s, answer, err := m.Create(ctx, offer)
+func (m *Manager) Start(ctx context.Context, offer webrtc.SessionDescription, character string) (string, webrtc.SessionDescription, error) {
+	s, answer, err := m.Create(ctx, offer, character)
 	if err != nil {
 		return "", webrtc.SessionDescription{}, err
 	}

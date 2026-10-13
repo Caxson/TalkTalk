@@ -64,17 +64,6 @@ func (r *reader) floatIn(key string, fallback, lo, hi float64) float64 {
 	return f
 }
 
-func (r *reader) choice(key, fallback string, allowed ...string) string {
-	v := strings.ToLower(r.str(key, fallback))
-	for _, a := range allowed {
-		if v == a {
-			return v
-		}
-	}
-	r.fail(key, fmt.Errorf("want one of %v, got %q", allowed, v))
-	return fallback
-}
-
 func (r *reader) oneOf(key string, fallback int, allowed ...int) int {
 	n := r.intIn(key, fallback, 0, 1<<30)
 	for _, a := range allowed {

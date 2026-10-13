@@ -2,10 +2,11 @@
 // arrive with the audio's packets but skip the jitter buffer, so they are
 // shown after the same delay the browser applies to that audio, and
 // blended between frames so motion stays smooth at any refresh rate.
-// Renderers (lam.js, vrm.js) read expression() once per drawn frame.
+// Renderers (vrm.js, live2d.js, lam.js) read expression() once per drawn frame.
 
 import { Behavior } from "./behavior.js";
 
+const RENDERERS = { vrm: "./vrm.js", lam: "./lam.js", live2d: "./live2d.js" };
 const MOTION_HEADER = 4;   // uint32 sequence before the weights
 const KEEP_MS = 1000;      // frame history kept for interpolation
 const STALE_MS = 120;      // past the newest frame: relax to neutral
@@ -43,12 +44,13 @@ export class Avatar {
     return this.acted;
   }
 
-  // create mounts the renderer named by info.kind (from /api/avatar).
+  // create mounts the renderer for a character (from /api/characters); a
+  // character without a model is voice-only.
   static async create(el, info) {
-    if (!info?.enabled) return null;
+    if (!info?.model) return null;
     const a = new Avatar(el);
     try {
-      const mod = info.kind === "lam" ? await import("./lam.js") : await import("./vrm.js");
+      const mod = await import(RENDERERS[info.kind] ?? "./vrm.js");
       await mod.mount(a, info);
       el.load.hidden = true;
     } catch (err) {
