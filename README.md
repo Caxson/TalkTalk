@@ -63,13 +63,13 @@ browser ◀─Opus/WebRTC── 20 ms playout ◀── TTS per sentence ◀─�
   that fed the assistant's own voice back into the microphone at 30% with
   no echo cancellation at all, it was never interrupted by itself and never
   answered its own words.
-- **Cast.** Five characters, picked in the page (each call keeps one): Mio
-  and Shino (VRoid 3D anime), Hiyori (Live2D 2D anime), Sora (a VRoid body
-  with all 52 ARKit shapes, "Perfect Sync") and Ya (LAM Gaussian-splat
-  photoreal). Each has its own CosyVoice voice and persona. One motion
+- **Cast.** Characters picked in the page (each call keeps one): Mio (VRoid
+  3D anime), Hiyori (Live2D 2D anime) and Ya (LAM Gaussian-splat
+  photoreal head). Each has its own CosyVoice voice and persona. One motion
   stream drives them all; renderers differ only in how much of it they
   show: VRM vowel shapes via VMagicMirror's mapping, Live2D standard
-  parameters, or the ARKit shapes directly (Sora, LAM). Micro-expression
+  parameters, or the ARKit shapes directly (LAM, and any "Perfect Sync"
+  VRM with all 52 ARKit shapes, added through a cast file). Micro-expression
   data comes from real faces, so the motion side is trained on people and
   any body can wear it. `TALKTALK_CHARACTER` sets the default;
   `TALKTALK_CAST_FILE` replaces the roster with a JSON list of
@@ -81,8 +81,7 @@ browser ◀─Opus/WebRTC── 20 ms playout ◀── TTS per sentence ◀─�
   committed. Hiyori is Live2D's sample under the Free Material License
   (small personal/indie use, credit shown under the avatar, no
   redistribution); Cubism Core is Live2D's proprietary runtime; LAM's
-  weights are CC BY-NC 4.0; the VRoid samples are CC0 / pixiv terms; the
-  Perfect Sync body is hinzka's (README allows use and adaptation).
+  weights are CC BY-NC 4.0; the VRoid sample follows pixiv's terms.
 - **Perception (camera, browser-only).** MediaPipe's face landmarker reads
   your face in the page at 15 Hz; video never leaves the browser. The
   avatar looks toward your face, answers a smile after a ~350 ms beat,

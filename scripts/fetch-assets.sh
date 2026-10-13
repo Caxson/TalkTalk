@@ -9,12 +9,6 @@
 #                                      license allows use as an avatar, edits
 #                                      and free redistribution, no credit needed
 #   avatars/idle_loop.vrma             idle motion from pixiv/ChatVRM (MIT)
-#   avatars/Sendagaya_Shino.vrm        pixiv VRoid beta sample, CC0 (its meta)
-#   avatars/ps_female.vrm              hinzka/52blendshapes-for-VRoid-face: a
-#                                      VRoid body with all 52 ARKit shapes
-#                                      ("Perfect Sync"); README allows use and
-#                                      adaptation, so it is fetched, never
-#                                      committed or redistributed
 #   avatars/status.zip                 LAM sample from OpenAvatarChat
 #                                      (Apache-2.0; LAM weights CC BY-NC 4.0)
 #   avatars/hiyori/...                 Live2D sample "Hiyori", Free Material
@@ -73,10 +67,6 @@ fetch "$CHATVRM/idle_loop.vrma" \
   "$DEST/avatars/idle_loop.vrma" ace95ba6dcc0bdf2ed1081c002332b4184441117c8d543b6f642b3d2c5cf99be
 
 # Cast: more characters (see internal/cast/builtin.go).
-fetch "https://raw.githubusercontent.com/madjin/vrm-samples/e16eb187100149a315ad92c3c9968f1d5baa6c7d/vroid/beta/Sendagaya_Shino.vrm" \
-  "$DEST/avatars/Sendagaya_Shino.vrm" 1e177c1a7b14f783a9c48395831db8616260d3bddd4154cb2784b779adca49b5
-fetch "https://raw.githubusercontent.com/hinzka/52blendshapes-for-VRoid-face/756f5abab7d2295ad5b5dbc2cd86972c388c48d2/VRoid_V110_Female_v1.1.3.vrm" \
-  "$DEST/avatars/ps_female.vrm" 36d6d242999d580bd0d3bcd8656bb2d4d5d4839f187d8198226bda905e1d9114
 fetch "https://raw.githubusercontent.com/HumanAIGC-Engineering/OpenAvatarChat/8b7b3b45bca28ae9ab5fa72ee31bc03c5a99b08b/src/handlers/client/ws_lam_client/lam_samples/status.zip" \
   "$DEST/avatars/status.zip" 59a9ff8e7dc11eacdb321726148442a31ba18ee919a8559c9a0011c169c59e65
 
