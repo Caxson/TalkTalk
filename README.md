@@ -64,8 +64,7 @@ browser ◀─Opus/WebRTC── 20 ms playout ◀── TTS per sentence ◀─�
   no echo cancellation at all, it was never interrupted by itself and never
   answered its own words.
 - **Cast.** Characters picked in the page (each call keeps one): Mio (VRoid
-  3D anime), Hiyori (Live2D 2D anime) and Ya (LAM Gaussian-splat
-  photoreal head). Each has its own CosyVoice voice and persona. One motion
+  3D anime), Hiyori (Live2D 2D anime) and Yuna (photoreal, see below). Each has its own CosyVoice voice and persona. One motion
   stream drives them all; renderers differ only in how much of it they
   show: VRM vowel shapes via VMagicMirror's mapping, Live2D standard
   parameters, or the ARKit shapes directly (LAM, and any "Perfect Sync"
@@ -85,11 +84,23 @@ browser ◀─Opus/WebRTC── 20 ms playout ◀── TTS per sentence ◀─�
   and upward glance, lowered eyes, a frown. Feelings ease in over ~0.2 s,
   sit under lip-sync, and linger 2.5 s after the speech before relaxing.
   Live2D values are mapped through each model's own parameter ranges.
+- **Photoreal.** Yuna is a LAM Gaussian-splat head composited onto the
+  photo it was made from: the photo gives hair, body and room, and only
+  the rendered face shows, fitted onto the photo's face by MediaPipe
+  landmarks (eyes and mouth, a least-squares similarity) and feathered in.
+  The head holds still so the fit stays exact; the face speaks and emotes,
+  and the picture breathes slightly. It renders in the browser (120 fps on
+  an M2 Max), no server GPU. To make one: put a front-facing, mouth-closed
+  photo of a fictional person through the LAM studio on ModelScope with
+  "Export ZIP file for Chatting Avatar" ticked, and save the zip and the
+  photo as `assets/avatars/yuna.zip` and `assets/avatars/yuna.png` (or add
+  your own character with a cast file: `kind: lam`, `background: …`).
+  The exported zip is published on Alibaba's public OSS by the studio.
 - **Asset licenses.** Everything is fetched by `make assets`, never
   committed. Hiyori is Live2D's sample under the Free Material License
   (small personal/indie use, credit shown under the avatar, no
   redistribution); Cubism Core is Live2D's proprietary runtime; LAM's
-  weights are CC BY-NC 4.0; the VRoid sample follows pixiv's terms.
+  weights (and so generated heads) are CC BY-NC 4.0; the VRoid sample follows pixiv's terms.
 - **Perception (camera, browser-only).** MediaPipe's face landmarker reads
   your face in the page at 15 Hz; video never leaves the browser. The
   avatar looks toward your face, answers a smile after a ~350 ms beat,

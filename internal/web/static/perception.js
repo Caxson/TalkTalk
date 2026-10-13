@@ -59,6 +59,29 @@ export function preloadPerception(info) {
   return landmarker;
 }
 
+// imageLandmarker is a separate detector for still pictures (fitting a
+// rendered head onto a photo). The camera's VIDEO-mode landmarker tracks a
+// face from frame to frame, so feeding it unrelated pictures in turn makes
+// it search where the last face was and return misplaced landmarks.
+let stills = null;
+export function imageLandmarker(info) {
+  stills ??= (async () => {
+    try {
+      const { FaceLandmarker, FilesetResolver } = await import(info.bundle);
+      const fileset = await FilesetResolver.forVisionTasks(info.wasm);
+      return await FaceLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: info.model, delegate: "CPU" },
+        runningMode: "IMAGE",
+        numFaces: 1,
+      });
+    } catch (err) {
+      stills = null;
+      throw err;
+    }
+  })();
+  return stills;
+}
+
 export class Perception {
   constructor(info, onReading) {
     this.info = info;

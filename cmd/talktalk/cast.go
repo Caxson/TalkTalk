@@ -75,6 +75,7 @@ func castInfo(c *cast.Cast, avatars bool, cfg config.Config, logger *slog.Logger
 			ci.Renderer = assetURL(cast.RendererModule[ch.Kind])
 			ci.Model = assetURL(ch.Model)
 			ci.Animation = assetURL(ch.Animation)
+			ci.Background = assetURL(ch.Background)
 		}
 		info.Characters = append(info.Characters, ci)
 	}

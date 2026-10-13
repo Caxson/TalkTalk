@@ -81,6 +81,7 @@ func TestValidation(t *testing.T) {
 		{{ID: "a", Name: "x", Kind: KindVRM, Model: "a.vrm", Voice: "v"}},
 		{{ID: "a", Name: "x", Kind: KindVRM}},
 		{{ID: "a", Name: "x", Kind: KindVRM, Model: "avatars/a.vrm", Animation: "/abs.vrma"}},
+		{{ID: "a", Name: "x", Kind: KindLAM, Model: "avatars/a.zip", Background: "../photo.png"}},
 		{{ID: "a", Name: "x", Kind: KindVRM, Model: "models/wav2arkit_cpu.onnx"}},
 		{{ID: "a", Name: "x", Kind: KindVRM, Model: "avatars/../models/x.onnx"}},
 		{{ID: "a", Name: "x", Kind: KindVRM, Model: `avatars\..\..\x`}},

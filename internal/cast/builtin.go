@@ -19,10 +19,13 @@ func Builtin() []Character {
 			Credit:  "This content uses sample data owned and copyrighted by Live2D Inc.",
 		},
 		{
-			ID: "ya", Name: "Ya", Tagline: "真人写实 · 知性",
-			Kind: KindLAM, Model: "avatars/status.zip",
-			Voice:   "longanwen_v3",
-			Persona: "你的名字叫雅，说话沉稳、知性、有分寸，像一位温和的朋友。",
+			// Photoreal: a LAM head composited onto the photo it was made
+			// from. Both files are made per user (see README, "Photoreal"),
+			// so this character appears only once they are in assets/.
+			ID: "yuna", Name: "Yuna", Tagline: "真人写实 · 韩系甜美",
+			Kind: KindLAM, Model: "avatars/yuna.zip", Background: "avatars/yuna.png",
+			Voice:   "longfeifei_v3",
+			Persona: "你的名字叫 Yuna，是个温柔甜美、有点小俏皮的女生，说话亲切自然，会认真听对方说话。",
 		},
 	}
 }

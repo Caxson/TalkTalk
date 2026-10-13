@@ -48,14 +48,15 @@ type CastInfo struct {
 // CharacterInfo describes one character and, when avatars are enabled,
 // which renderer draws it and where its files are.
 type CharacterInfo struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Tagline   string `json:"tagline,omitempty"`
-	Kind      string `json:"kind"`                // "vrm" | "lam" | "live2d"
-	Renderer  string `json:"renderer,omitempty"`  // ES module URL of the renderer library
-	Model     string `json:"model,omitempty"`     // avatar file URL
-	Animation string `json:"animation,omitempty"` // idle motion (.vrma), VRM only
-	Credit    string `json:"credit,omitempty"`    // attribution the avatar's license requires
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Tagline    string `json:"tagline,omitempty"`
+	Kind       string `json:"kind"`                 // "vrm" | "lam" | "live2d"
+	Renderer   string `json:"renderer,omitempty"`   // ES module URL of the renderer library
+	Model      string `json:"model,omitempty"`      // avatar file URL
+	Animation  string `json:"animation,omitempty"`  // idle motion (.vrma), VRM only
+	Background string `json:"background,omitempty"` // photo the head is composited onto (LAM)
+	Credit     string `json:"credit,omitempty"`     // attribution the avatar's license requires
 }
 
 // PerceptionInfo locates MediaPipe's face landmarker for the browser.
