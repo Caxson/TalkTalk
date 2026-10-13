@@ -18,7 +18,8 @@ type Event struct {
 	// user        live recognition, interim or final (Text, Final)
 	// turn        a reply to the user's words began (Turn, Text = what it answers)
 	// retracted   a reply was abandoned before any audio; its turn is void
-	// assistant   a reply segment started playing (Turn, Text)
+	// assistant   a reply segment started playing (Turn, Text, and Affect
+	//             when the segment changes the assistant's feeling)
 	// backchannel the user said something short over the reply (Turn, Text)
 	// interrupted the user cut the reply off (Turn)
 	// metrics     latency breakdown for a reply (Turn, Metrics)
@@ -29,6 +30,7 @@ type Event struct {
 	State     State        `json:"state,omitempty"`
 	Text      string       `json:"text,omitempty"`
 	Final     bool         `json:"final,omitempty"`
+	Affect    Affect       `json:"affect,omitempty"`
 	Turn      int          `json:"turn,omitempty"`
 	Metrics   *TurnMetrics `json:"metrics,omitempty"`
 	Error     string       `json:"error,omitempty"`

@@ -57,7 +57,9 @@ func (s *Segmenter) Push(delta string) []string {
 		s.buf = s.buf[cut:]
 		if seg = clean(seg); seg != "" {
 			out = append(out, seg)
-			s.emitted++
+			if speakable([]rune(seg)) > 0 {
+				s.emitted++ // a tag-only segment does not use up the early first cut
+			}
 		}
 	}
 }
@@ -118,11 +120,17 @@ func speakable(rs []rune) int {
 	return n
 }
 
-// clean trims whitespace and drops segments with nothing to pronounce.
+// clean trims whitespace. A segment with nothing to pronounce is dropped,
+// except for any affect marks in it, which still carry a feeling forward.
 func clean(seg string) string {
 	seg = strings.TrimSpace(seg)
 	if speakable([]rune(seg)) == 0 {
-		return ""
+		return strings.Map(func(r rune) rune {
+			if _, ok := affectOfMark[r]; ok {
+				return r
+			}
+			return -1
+		}, seg)
 	}
 	return seg
 }

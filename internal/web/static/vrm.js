@@ -13,6 +13,7 @@ import { perfectSync, vowels } from "./rig.js";
 // Head-and-shoulders still: at 22° the frame spans ~0.43 m vertically at
 // 1.1 m, from the top of the hair (head bone + ~0.2 m) to the chest.
 const FRAMING = { fov: 22, distance: 1.1, above: 0.02, aim: 0.02 }; // metres around the head bone
+const POSE_RAD = Math.PI / 12; // affect pose ±1 → ±15° of head rotation
 const LOOK = { drift: 0.035, thinkUp: 0.18, thinkSide: 0.12, follow: 0.28 }; // metres at the camera
 
 export async function mount(avatar, info) {
@@ -79,13 +80,20 @@ export async function mount(avatar, info) {
   resize();
 
   const em = vrm.expressionManager;
+  const setPreset = (name, w) => { if (em.getExpression(name)) em.setValue(name, Math.min(1, w)); };
+  // Feelings sit under speech: a preset that blocks the mouth or the blinks
+  // (some models set overrideMouth/overrideBlink) would silence lip-sync.
+  for (const name of ["relaxed", "surprised", "sad"]) {
+    const x = em.getExpression(name);
+    if (x) { x.overrideMouth = "none"; x.overrideBlink = "none"; }
+  }
   const arkit = perfectSync(em.expressions.map((x) => x.expressionName));
   if (arkit) avatar.el.take.textContent += " · ARKit 52";
   const head = vrm.humanoid.getNormalizedBoneNode("head");
   // Behavior offsets on the head, as applied last frame. They are taken
   // off before the animation updates and put back after, so they never
   // accumulate, whether or not the idle clip animates the head.
-  const applied = { pitch: 0, yaw: 0 };
+  const applied = { pitch: 0, yaw: 0, roll: 0 };
   const clock = new THREE.Clock();
   const draw = () => {
     const dt = Math.min(clock.getDelta(), 0.1);
@@ -101,8 +109,13 @@ export async function mount(avatar, info) {
       }
       avatar.mouth = e.jawOpen ?? 0;
     } else {
-      em.setValue("relaxed", Math.min(1, b.smile * 0.85));
-      const v = vowels(e);
+      // Vowel-only rigs show feelings through their presets; the mouth
+      // shapes come from speech alone so a smile does not read as "i".
+      const lv = avatar.mood.levels;
+      setPreset("relaxed", Math.max(b.smile * 0.85, lv.happy * 0.8, lv.shy * 0.5));
+      setPreset("surprised", lv.surprised * 0.6);
+      setPreset("sad", lv.sad * 0.6);
+      const v = vowels(avatar.lips);
       em.setValue("aa", v.aa);
       em.setValue("ih", v.ih);
       em.setValue("ou", v.ou);
@@ -126,13 +139,18 @@ export async function mount(avatar, info) {
 
     head.rotation.x -= applied.pitch;
     head.rotation.y -= applied.yaw;
+    head.rotation.z -= applied.roll;
     mixer.update(dt);
     // Behavior rides on top of the idle animation: nod, and turn the head
     // a little toward the person (the eyes do most of the following).
-    applied.pitch = b.nod;
+    // The feeling's pose (affect.js) tilts and lifts or lowers the head;
+    // ±1 there is about ±30°, kept to half for a 3D head.
+    applied.pitch = b.nod - avatar.pose.pitch * POSE_RAD;
     applied.yaw = b.gaze.x * 0.12;
+    applied.roll = -avatar.pose.roll * POSE_RAD;
     head.rotation.x += applied.pitch;
     head.rotation.y += applied.yaw;
+    head.rotation.z += applied.roll;
     avatar.headYaw = head.rotation.y;
     vrm.update(dt);
     renderer.render(scene, camera);

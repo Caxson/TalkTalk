@@ -178,15 +178,15 @@ function addMetrics(m) {
 const eventLog = []; // { type, at } for automated checks
 
 function onEvent(ev) {
-  eventLog.push({ type: ev.type, at: performance.now() });
+  eventLog.push({ type: ev.type, at: performance.now(), affect: ev.affect });
   switch (ev.type) {
     case "state": setState(ev.state); break;
     case "user": transcript.hearing(ev.text, ev.final); break;
-    case "turn": transcript.open(ev.turn, ev.text); break;
+    case "turn": transcript.open(ev.turn, ev.text); avatar?.feel("neutral"); break;
     case "retracted": transcript.retract(ev.turn); break;
-    case "assistant": transcript.reply(ev.turn, ev.text); break;
+    case "assistant": transcript.reply(ev.turn, ev.text); if (ev.affect) avatar?.feel(ev.affect); break;
     case "backchannel": transcript.aside(ev.turn, ev.text); break;
-    case "interrupted": transcript.cut(ev.turn); break;
+    case "interrupted": transcript.cut(ev.turn); avatar?.feel("neutral"); break;
     case "yield": setState("yielding"); break;
     case "resume": if (ui.stage.dataset.state === "yielding") setState("speaking"); break;
     case "metrics": addMetrics(ev.metrics); break;
@@ -495,6 +495,9 @@ if (ui.still) {
 // Exposed for automated end-to-end checks.
 window.__talktalk = {
   state: () => ui.stage.dataset.state, live: () => Boolean(call), events: () => eventLog, character: () => character,
+  feel: (name) => avatar?.feel(name),
+  l2d: () => avatar?.l2d,
+  param: (id, v) => { if (avatar) avatar.paramOverride = { ...(avatar.paramOverride ?? {}), [id]: v }; },
   avatar: () => avatar && { received: avatar.received, fps: avatar.fps, delay: avatar.delayMs, jaw: avatar.last?.[avatar.names?.indexOf("jawOpen")] ?? null, mouth: avatar.mouth,
-    reading: avatar.reading, smile: avatar.acted?.smile ?? 0, gaze: avatar.acted?.gaze ?? null, nod: avatar.acted?.nod ?? 0, headYaw: avatar.headYaw ?? null },
+    reading: avatar.reading, mood: avatar.mood.current, moodLevels: { ...avatar.mood.levels }, smile: avatar.acted?.smile ?? 0, gaze: avatar.acted?.gaze ?? null, nod: avatar.acted?.nod ?? 0, headYaw: avatar.headYaw ?? null },
 };
