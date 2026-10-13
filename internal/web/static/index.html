@@ -19,7 +19,17 @@
 
   <main class="sheet">
     <section class="stage" aria-label="Conversation state">
-      <div class="label">State</div>
+      <figure class="still" id="still" hidden>
+        <div class="still-frame">
+          <div class="still-canvas" id="still-canvas" aria-label="TalkTalk avatar"></div>
+          <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+          <span class="still-meta tl-meta" id="still-take">Take 01</span>
+          <span class="still-meta tr-meta" id="still-fps">— fps</span>
+          <span class="still-meta bl-meta" id="still-sync">sync —</span>
+          <span class="still-load" id="still-load">loading avatar · 0%</span>
+        </div>
+      </figure>
+      <div class="label state-label">State</div>
       <h1 class="state" id="state-word">standby.</h1>
       <div class="state-zh" id="state-zh">待命</div>
 

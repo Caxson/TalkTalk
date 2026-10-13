@@ -44,6 +44,14 @@ type Player struct {
 
 	gain       float64 // applied to the frame being played
 	targetGain float64
+
+	// Timeline for motion: every queued frame gets a monotonically
+	// increasing index; sample positions are index*frameSamples+offset.
+	frameSamples int64
+	queuedFrames int64 // frames ever queued
+	nextPlay     int64 // index of the next queued frame to play
+	motion       []motionItem
+	motionSink   MotionSink
 }
 
 // gainStep bounds the gain change per 20ms frame, so ducking ramps over a
@@ -57,13 +65,14 @@ func New(sampleRate int, sink Sink) (*Player, error) {
 		return nil, err
 	}
 	p := &Player{
-		enc:        enc,
-		sink:       sink,
-		silence:    make([]int16, enc.FrameSamples()),
-		played:     make(chan int, 256),
-		framer:     audio.NewFramer(sampleRate, audio.FrameDuration),
-		gain:       1,
-		targetGain: 1,
+		frameSamples: int64(enc.FrameSamples()),
+		enc:          enc,
+		sink:         sink,
+		silence:      make([]int16, enc.FrameSamples()),
+		played:       make(chan int, 256),
+		framer:       audio.NewFramer(sampleRate, audio.FrameDuration),
+		gain:         1,
+		targetGain:   1,
 	}
 	p.encode = enc.Encode
 	return p, nil
@@ -87,6 +96,7 @@ func (p *Player) Enqueue(pcm []int16) {
 	for _, f := range p.framer.Push(pcm) {
 		p.queue = append(p.queue, item{frame: f})
 		p.pending++
+		p.queuedFrames++
 	}
 }
 
@@ -98,6 +108,7 @@ func (p *Player) Mark(id int) {
 	if f, ok := p.framer.Flush(); ok {
 		p.queue = append(p.queue, item{frame: f})
 		p.pending++
+		p.queuedFrames++
 	}
 	p.queue = append(p.queue, item{mark: id})
 }
@@ -115,6 +126,8 @@ func (p *Player) Flush() []int {
 	}
 	p.queue, p.pending = nil, 0
 	p.framer.Reset()
+	p.nextPlay = p.queuedFrames // dropped frames never play
+	p.motion = nil
 	// Whatever plays next starts at full volume.
 	p.gain, p.targetGain = 1, 1
 	return dropped
@@ -141,7 +154,7 @@ func (p *Player) run(ctx context.Context, ticks <-chan time.Time) error {
 			return nil
 		case <-ticks:
 		}
-		frame, marks := p.next()
+		frame, marks, motion := p.next()
 		for _, id := range marks {
 			p.emit(id)
 		}
@@ -152,13 +165,18 @@ func (p *Player) run(ctx context.Context, ticks <-chan time.Time) error {
 		if err := p.sink(pkt, audio.FrameDuration); err != nil {
 			return fmt.Errorf("playout: sink: %w", err)
 		}
+		// Motion leaves with the audio it belongs to, in the same tick.
+		for _, m := range motion {
+			p.motionSink(m)
+		}
 	}
 }
 
-// next pops marks that are due plus at most one frame. Marks after the
-// popped frame are emitted on the following tick, once that frame has been
-// handed to the sink.
-func (p *Player) next() ([]int16, []int) {
+// next pops marks that are due plus at most one frame, and the motion
+// payloads that belong to that frame. Marks after the popped frame are
+// emitted on the following tick, once that frame has been handed to the
+// sink.
+func (p *Player) next() ([]int16, []int, [][]byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var marks []int
@@ -168,18 +186,20 @@ func (p *Player) next() ([]int16, []int) {
 	}
 	if len(p.queue) == 0 {
 		p.queue = nil
-		return p.silence, marks
+		return p.silence, marks, nil
 	}
 	f := p.applyGain(p.queue[0].frame)
 	p.queue = p.queue[1:]
 	p.pending--
+	motion := p.dueMotion(p.nextPlay)
+	p.nextPlay++
 	// A mark right behind the last frame of a segment is due as soon as
 	// that frame is sent; emit it now rather than a tick late.
 	for len(p.queue) > 0 && p.queue[0].frame == nil {
 		marks = append(marks, p.queue[0].mark)
 		p.queue = p.queue[1:]
 	}
-	return f, marks
+	return f, marks, motion
 }
 
 // applyGain steps the gain toward its target and scales f in place (queued

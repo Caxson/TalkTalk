@@ -30,6 +30,10 @@ type Player interface {
 	Flush() []int
 	Played() <-chan int
 	SetGain(g float64)
+	// Motion timeline (see playout.Player).
+	Pending() time.Duration
+	EnqueuePos() int64
+	AttachMotion(pos int64, payload []byte)
 }
 
 // Config tunes conversational behaviour.
@@ -89,9 +93,12 @@ type Deps struct {
 	LLM        llm.Streamer
 	TTS        tts.Synthesizer
 	Player     Player
-	Notify     func(Event)
-	Logger     *slog.Logger
-	Now        func() time.Time
+	// Lips, if set, starts a lip-sync stream for speech at the given
+	// sample rate; its frames drive the avatar in lockstep with audio.
+	Lips   func(sampleRate int) (LipStream, error)
+	Notify func(Event)
+	Logger *slog.Logger
+	Now    func() time.Time
 }
 
 // Engine runs one conversation. Create with New, feed audio with PushAudio,
@@ -727,28 +734,22 @@ func (e *Engine) segmentReply(ctx context.Context, msgs []llm.Message, segments 
 // errDetached if the turn stopped being current, or whatever stopped
 // synthesis (including ctx's).
 func (e *Engine) speak(ctx context.Context, id int, segments <-chan string, report func(turnEventKind, string, error)) (bool, error) {
-	firstAudio := true
+	firstAudio, ttsReported := true, false
 	for text := range segments {
-		started := false
+		v := e.newVoice(id, text)
 		for pcm, err := range e.d.TTS.Synthesize(ctx, text) {
 			if err != nil {
 				return !firstAudio, fmt.Errorf("tts: %w", err)
 			}
-			if !started {
-				if firstAudio {
-					report(evTTSFirst, "", nil)
-				}
-				// Mark the segment start right before its first audio so
-				// the transcript follows what is actually being heard.
-				if !e.mark(id, markInfo{turn: id, text: text}) {
-					return !firstAudio, errDetached
-				}
-				started = true
+			if !ttsReported {
+				ttsReported = true
+				report(evTTSFirst, "", nil)
 			}
-			if !e.enqueue(id, pcm) {
-				return !firstAudio, errDetached
+			queued, err := v.push(pcm)
+			if err != nil {
+				return !firstAudio, err
 			}
-			if firstAudio {
+			if queued && firstAudio {
 				firstAudio = false
 				report(evAudioOut, "", nil)
 			}
@@ -756,6 +757,14 @@ func (e *Engine) speak(ctx context.Context, id int, segments <-chan string, repo
 		// Synthesizers may stop silently on cancellation.
 		if err := ctx.Err(); err != nil {
 			return !firstAudio, err
+		}
+		queued, err := v.finish()
+		if err != nil {
+			return !firstAudio, err
+		}
+		if queued && firstAudio {
+			firstAudio = false
+			report(evAudioOut, "", nil)
 		}
 	}
 	return !firstAudio, nil

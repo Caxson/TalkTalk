@@ -23,3 +23,6 @@ __pycache__/
 *.pyc
 .venv/
 /talktalk
+
+# Downloaded avatar assets (make assets)
+/assets/

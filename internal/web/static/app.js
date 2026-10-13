@@ -1,5 +1,7 @@
 // TalkTalk browser client: one WebRTC call, a transcript, a latency ledger.
 
+import { Avatar } from "./avatar.js";
+
 const $ = (id) => document.getElementById(id);
 const ui = {
   call: $("call"), callLabel: $("call-label"), notice: $("notice"),
@@ -7,7 +9,11 @@ const ui = {
   stage: document.querySelector(".stage"), word: $("state-word"), zh: $("state-zh"),
   turns: $("turns"), turnCount: $("turn-count"), ledger: $("ledger"),
   voice: $("voice"), micMeter: $("meter-mic"), voiceMeter: $("meter-voice"),
+  still: $("still"),
 };
+
+let avatar = null;       // set once the avatar has loaded, if the server has one
+let motionNames = null;  // from the session's "avatar" event; may precede the avatar
 
 const STATES = {
   standby:   ["standby.", "待命"],
@@ -28,6 +34,7 @@ function setState(name) {
   ui.word.textContent = word;
   ui.zh.textContent = zh;
   ui.stage.dataset.state = name;
+  avatar?.setState(name);
 }
 
 function setLive(live) {
@@ -178,6 +185,7 @@ function onEvent(ev) {
     case "yield": setState("yielding"); break;
     case "resume": if (ui.stage.dataset.state === "yielding") setState("speaking"); break;
     case "metrics": addMetrics(ev.metrics); break;
+    case "avatar": motionNames = ev.names; avatar?.setNames(ev.names); break;
     case "error": notice(`! ${ev.error}`); break;
   }
 }
@@ -202,6 +210,7 @@ function meter(ctx, stream, el) {
     const db = 10 * Math.log10(sum / buf.length + 1e-12);   // dBFS
     const level = Math.max(0, Math.min(1, (db + 60) / 50));  // -60..-10 dBFS
     const lit = Math.round(level * TICKS);
+    el.dataset.level = level.toFixed(3); // read by automated sync checks
     el.dataset.active = String(lit > 1);
     ticks.forEach((t, i) => {
       const on = i < lit;
@@ -221,6 +230,24 @@ function startMeters(mic) {
     addVoice(stream) { fns.push(meter(ctx, stream, ui.voiceMeter)); },
     stop() { cancelAnimationFrame(raf); ctx.close(); [ui.micMeter, ui.voiceMeter].forEach(buildTicks); },
   };
+}
+
+// ---------- avatar sync ----------
+
+// The avatar must show each mouth shape when its audio is heard. Motion
+// arrives with the audio's packets but skips the jitter buffer, so it is
+// delayed by the buffer's current average delay (plus one audio frame).
+async function measureAudioDelay(pc) {
+  try {
+    const stats = await pc.getStats();
+    stats.forEach((r) => {
+      if (r.type !== "inbound-rtp" || r.kind !== "audio" || !r.jitterBufferEmittedCount) return;
+      const prev = pc.__jb ?? { delay: 0, count: 0 };
+      const dDelay = r.jitterBufferDelay - prev.delay, dCount = r.jitterBufferEmittedCount - prev.count;
+      pc.__jb = { delay: r.jitterBufferDelay, count: r.jitterBufferEmittedCount };
+      if (dCount > 0 && avatar) avatar.setDelay(Math.min(400, Math.max(20, (dDelay / dCount) * 1000 + 20)));
+    });
+  } catch { /* stats are best-effort */ }
 }
 
 // ---------- call lifecycle ----------
@@ -278,6 +305,10 @@ async function begin() {
   };
   const dc = pc.createDataChannel("events");
   dc.onmessage = (m) => { try { onEvent(JSON.parse(m.data)); } catch (e) { console.error(e); } };
+  // Motion frames: a late frame is useless, so no ordering, no retransmits.
+  const md = pc.createDataChannel("motion", { ordered: false, maxRetransmits: 0 });
+  md.binaryType = "arraybuffer";
+  md.onmessage = (m) => avatar?.onMotion(m.data);
 
   // end() may run while we are still negotiating (hang-up, pagehide);
   // after every await, stop if this call is no longer the current one.
@@ -307,6 +338,8 @@ async function begin() {
   setLive(true);
   setState("listening");
   c.timer = setInterval(() => { ui.timecode.textContent = fmtClock(performance.now() - c.startedAt); }, 250);
+  // Runs even if the avatar is still loading; it may arrive mid-call.
+  c.syncTimer = setInterval(() => measureAudioDelay(pc), 1000);
   ui.call.disabled = false;
 }
 
@@ -315,6 +348,7 @@ function end() {
   if (!c) return;
   call = null;
   clearInterval(c.timer);
+  clearInterval(c.syncTimer);
   c.meters.stop();
   c.mic.getTracks().forEach((t) => t.stop());
   if (c.id) api("DELETE", `/api/sessions/${c.id}`).catch(() => {});
@@ -336,5 +370,24 @@ window.addEventListener("pagehide", end);
 [ui.micMeter, ui.voiceMeter].forEach(buildTicks);
 setLive(false);
 
+// Load the avatar (if the server has one) while the page sits in standby.
+if (ui.still) {
+  ui.still.hidden = true;
+  fetch("/api/avatar").then((r) => r.json()).then(async (env) => {
+    if (!env?.data?.enabled) return;
+    document.body.classList.add("avatar");
+    ui.still.hidden = false;
+    avatar = await Avatar.create({
+      canvas: $("still-canvas"), load: $("still-load"), fps: $("still-fps"), sync: $("still-sync"), take: $("still-take"),
+    }, env.data);
+    if (!avatar) { document.body.classList.remove("avatar"); ui.still.hidden = true; return; }
+    avatar.setState(ui.stage.dataset.state);
+    if (motionNames) avatar.setNames(motionNames); // the call started first
+  }).catch(() => {});
+}
+
 // Exposed for automated end-to-end checks.
-window.__talktalk = { state: () => ui.stage.dataset.state, live: () => Boolean(call), events: () => eventLog };
+window.__talktalk = {
+  state: () => ui.stage.dataset.state, live: () => Boolean(call), events: () => eventLog,
+  avatar: () => avatar && { received: avatar.received, fps: avatar.fps, delay: avatar.delayMs, jaw: avatar.last?.[avatar.names?.indexOf("jawOpen")] ?? null },
+};

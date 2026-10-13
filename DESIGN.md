@@ -38,5 +38,10 @@ without Google Fonts, which is unreliable in mainland China.
 
 ## The one bold thing
 
-The current state word (*listening* / *thinking* / *speaking*), set huge in
-italic serif on the stage. Everything else stays quiet.
+The avatar, presented as a framed film still: hairline frame, corner marks,
+tiny mono slate marks (`TAKE 01`, fps, sync offset). The state word
+(*listening* / *thinking* / *speaking* / *yielding*) becomes its italic
+caption. Corner marks turn tally-red only while the assistant is audible.
+
+Without an avatar (assets not downloaded), the state word itself is the
+bold thing, set huge in italic serif.

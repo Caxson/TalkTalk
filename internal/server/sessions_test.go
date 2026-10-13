@@ -136,3 +136,33 @@ func TestStaticFiles(t *testing.T) {
 		t.Errorf("healthz shadowed by static: %d", rec.Code)
 	}
 }
+
+func TestAvatarEndpointAndAssets(t *testing.T) {
+	h := New(Options{Logger: discardLogger()}).Handler()
+	if _, env := do(t, h, http.MethodGet, "/api/avatar", ""); env.Data.(map[string]any)["enabled"] != false {
+		t.Errorf("avatar without config = %+v", env)
+	}
+	assets := PublicFS(fstest.MapFS{
+		"avatars/a.zip":      {Data: []byte("zip")},
+		"models/secret.onnx": {Data: []byte("400MB")},
+	}, "avatars", "vendor")
+	h = New(Options{Logger: discardLogger(), Assets: assets,
+		Avatar: &AvatarInfo{Renderer: "/assets/vendor/r.js", Model: "/assets/avatars/a.zip"}}).Handler()
+	_, env := do(t, h, http.MethodGet, "/api/avatar", "")
+	d := env.Data.(map[string]any)
+	if d["enabled"] != true || d["model"] != "/assets/avatars/a.zip" || d["renderer"] != "/assets/vendor/r.js" {
+		t.Errorf("avatar info = %v", d)
+	}
+	rec, _ := do(t, h, http.MethodGet, "/assets/avatars/a.zip", "")
+	if rec.Code != http.StatusOK || rec.Body.String() != "zip" {
+		t.Errorf("asset = %d %q", rec.Code, rec.Body.String())
+	}
+	if rec, _ := do(t, h, http.MethodGet, "/assets/../go.mod", ""); rec.Code == http.StatusOK {
+		t.Error("path traversal out of assets")
+	}
+	for _, p := range []string{"/assets/models/secret.onnx", "/assets/", "/assets/avatars/", "/assets/avatars"} {
+		if rec, _ := do(t, h, http.MethodGet, p, ""); rec.Code == http.StatusOK {
+			t.Errorf("GET %s = 200, want hidden (body %q)", p, rec.Body.String())
+		}
+	}
+}

@@ -4,10 +4,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/Caxson/TalkTalk/internal/config"
@@ -44,6 +46,13 @@ func run() error {
 		return fmt.Errorf("listen %s: %w", cfg.HTTPAddr, err)
 	}
 
+	// Only the browser-facing assets are served, and only with an avatar.
+	avatar := avatarInfo(cfg, logger)
+	var assets fs.FS
+	if avatar != nil {
+		assets = server.PublicFS(os.DirFS(cfg.Avatar.AssetsDir), "vendor", "avatars")
+	}
+
 	logger.Info("talktalk starting", "version", version.Version,
 		"llm", cfg.LLM.Model, "asr", cfg.Speech.ASRModel, "tts", cfg.Speech.TTSModel+"/"+cfg.Speech.TTSVoice)
 	srv := server.New(server.Options{
@@ -52,6 +61,8 @@ func run() error {
 		ShutdownTimeout: cfg.ShutdownTimeout,
 		Sessions:        sessions,
 		Static:          web.Static(),
+		Assets:          assets,
+		Avatar:          avatar,
 	})
 	serveErr := srv.Serve(ctx, ln)
 
@@ -71,4 +82,20 @@ func newLogger(cfg config.Config) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
 	}
 	return slog.New(slog.NewTextHandler(os.Stderr, opts))
+}
+
+// avatarInfo enables the browser avatar when lip-sync is configured and
+// the downloaded renderer and avatar are present.
+func avatarInfo(cfg config.Config, logger *slog.Logger) *server.AvatarInfo {
+	if cfg.Avatar.ModelPath == "" {
+		return nil
+	}
+	const renderer, model = "vendor/gaussian-splat-renderer-for-lam.module.js", "avatars/p2-1.zip"
+	for _, f := range []string{renderer, model} {
+		if _, err := os.Stat(filepath.Join(cfg.Avatar.AssetsDir, f)); err != nil {
+			logger.Warn("avatar assets missing, run make assets", "file", f)
+			return nil
+		}
+	}
+	return &server.AvatarInfo{Renderer: "/assets/" + renderer, Model: "/assets/" + model}
 }

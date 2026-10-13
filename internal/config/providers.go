@@ -19,6 +19,11 @@ const (
 	EnvInterruptMinRune = "TALKTALK_INTERRUPT_MIN_RUNES"
 	EnvMaxSessions      = "TALKTALK_MAX_SESSIONS"
 	EnvICEServers       = "TALKTALK_ICE_SERVERS"
+
+	EnvLipsyncModel   = "TALKTALK_LIPSYNC_MODEL"
+	EnvOnnxRuntimeLib = "TALKTALK_ONNXRUNTIME_LIB"
+	EnvMouthGain      = "TALKTALK_MOUTH_GAIN"
+	EnvAssetsDir      = "TALKTALK_ASSETS_DIR"
 )
 
 // Defaults chosen from measured latency (see README).
@@ -56,6 +61,17 @@ type Speech struct {
 	TTSSampleRate int
 }
 
+// Avatar configures lip-sync and the browser avatar. An empty ModelPath
+// disables the avatar: the client falls back to the transcript only.
+type Avatar struct {
+	ModelPath   string
+	LibraryPath string
+	MouthGain   float64
+	// AssetsDir holds downloaded client assets (renderer, avatar), served
+	// under /assets/.
+	AssetsDir string
+}
+
 // Conversation tunes the dialog engine and session limits.
 type Conversation struct {
 	SystemPrompt      string
@@ -84,6 +100,14 @@ func loadProviders(r *reader, cfg *Config) {
 		TTSModel:      r.str(EnvTTSModel, DefaultTTSModel),
 		TTSVoice:      r.str(EnvTTSVoice, DefaultTTSVoice),
 		TTSSampleRate: r.oneOf(EnvTTSSampleRate, DefaultTTSSampleRate, 8000, 16000, 24000, 48000),
+	}
+	cfg.Avatar = Avatar{
+		ModelPath:   r.str(EnvLipsyncModel, ""),
+		LibraryPath: r.str(EnvOnnxRuntimeLib, ""),
+		// The model opens the mouth little for Chinese; 1.6 measured on
+		// CosyVoice speech gives a natural jaw range.
+		MouthGain: r.floatIn(EnvMouthGain, 1.6, 0.5, 4),
+		AssetsDir: r.str(EnvAssetsDir, "assets"),
 	}
 	cfg.Conversation = Conversation{
 		SystemPrompt:      r.str(EnvSystemPrompt, DefaultSystemPrompt),

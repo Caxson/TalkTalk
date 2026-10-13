@@ -84,6 +84,9 @@ func (f *Framer) Flush() ([]int16, bool) {
 	return out, true
 }
 
+// Len is the number of buffered samples not yet emitted as a frame.
+func (f *Framer) Len() int { return len(f.buf) }
+
 // Drain returns the remaining samples unpadded (nil if none).
 func (f *Framer) Drain() []int16 {
 	out := f.buf
