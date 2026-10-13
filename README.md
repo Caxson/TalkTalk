@@ -77,6 +77,14 @@ browser ◀─Opus/WebRTC── 20 ms playout ◀── TTS per sentence ◀─�
   persona, credit}` (paths relative to `assets/`), which is how to add a
   model you downloaded yourself. Only characters whose files exist are
   offered.
+- **Feelings.** The model opens each reply with a feeling tag
+  (`[happy]`, `[surprised]`, `[thinking]`, `[shy]`, `[sad]`, `[neutral]`)
+  and adds one where the mood turns. Tags are stripped before speech and
+  travel with their sentence, so the face changes when that sentence is
+  heard: smile and smiling eyes, raised brows and wide eyes, a head tilt
+  and upward glance, lowered eyes, a frown. Feelings ease in over ~0.2 s,
+  sit under lip-sync, and linger 2.5 s after the speech before relaxing.
+  Live2D values are mapped through each model's own parameter ranges.
 - **Asset licenses.** Everything is fetched by `make assets`, never
   committed. Hiyori is Live2D's sample under the Free Material License
   (small personal/indie use, credit shown under the avatar, no

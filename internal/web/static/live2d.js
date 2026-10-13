@@ -3,15 +3,15 @@
 // each frame the ARKit stream is mapped onto Cubism's standard parameters
 // (rig.js) on top of them, so speech and reactions ride on a living body.
 
-import { live2d as rig } from "./rig.js";
+import { live2d as rig, toCubism } from "./rig.js";
 
 // Head-and-shoulders still: the model is drawn this many frame-heights
 // tall, hanging from just above the frame's top edge.
 const FRAMING = { height: 2.5, top: -0.04 };
 // Parameters the motions also animate: ours are added to theirs.
-const ADDITIVE = new Set(["ParamBrowLY", "ParamBrowRY"]);
-// Head angles go through the engine's focus, which it applies before
-// physics, so hair and ribbons swing with the turn (focus 1 = 30°).
+const ADDITIVE = new Set(["ParamBrowLY", "ParamBrowRY", "ParamBrowLAngle", "ParamBrowRAngle", "ParamBrowLForm", "ParamBrowRForm", "ParamAngleZ"]);
+// Head turn and nod go through the engine's focus, which it applies before
+// physics, so hair and ribbons swing with them (focus 1 = 30°).
 const HEAD = new Set(["ParamAngleX", "ParamAngleY"]);
 
 function loadScript(src) {
@@ -41,6 +41,22 @@ export async function mount(avatar, info) {
   const internal = model.internalModel;
   internal.eyeBlink = undefined; // blinks come with the motion stream
   const core = internal.coreModel;
+  // The Cubism framework addresses parameters by id handle, not by name;
+  // a plain string silently matches nothing. Each parameter also has its
+  // own [min, default, max], which relative rig values are mapped into.
+  const params = new Map();
+  const param = (name) => {
+    if (!params.has(name)) {
+      const handle = internal.getIdSafe(name);
+      const i = core.getParameterIndex(handle);
+      const known = i < core.getParameterCount();
+      params.set(name, known && {
+        handle,
+        range: [core.getParameterMinimumValue(i), core.getParameterDefaultValue(i), core.getParameterMaximumValue(i)],
+      });
+    }
+    return params.get(name);
+  };
   const baseHeight = model.height / model.scale.y;
   const frame = () => {
     const { width: w, height: h } = app.screen;
@@ -51,18 +67,25 @@ export async function mount(avatar, info) {
   app.renderer.on("resize", frame);
   frame();
 
+  avatar.l2d = { core, param, internal, model }; // for in-page debugging
   internal.on("beforeModelUpdate", () => {
     const e = avatar.expression();
     const b = avatar.act();
-    const p = rig(e, { ...b, headYaw: b.gaze.x * 0.25 });
+    const p = rig(e, { ...b, headYaw: b.gaze.x * 0.25 }, avatar.pose);
     // Applied on the next frame's physics; one frame (8-16 ms) of lag.
-    internal.focusController.focus(p.ParamAngleX / 30, p.ParamAngleY / 30, true);
-    for (const [id, v] of Object.entries(p)) {
-      if (HEAD.has(id)) continue;
-      if (ADDITIVE.has(id)) core.addParameterValueById(id, v);
-      else core.setParameterValueById(id, v);
+    internal.focusController.focus(p.ParamAngleX, p.ParamAngleY, true);
+    for (const [name, v] of Object.entries(p)) {
+      const q = !HEAD.has(name) && param(name);
+      if (!q) continue; // a parameter this model does not have
+      if (ADDITIVE.has(name)) core.addParameterValueById(q.handle, toCubism(v, q.range) - q.range[1]);
+      else core.setParameterValueById(q.handle, toCubism(v, q.range));
+    }
+    // Debug overrides (window.__talktalk.param, model units) win over everything.
+    for (const [name, v] of Object.entries(avatar.paramOverride ?? {})) {
+      const q = param(name);
+      if (q) core.setParameterValueById(q.handle, v);
     }
     avatar.mouth = p.ParamMouthOpenY;
-    avatar.headYaw = (p.ParamAngleX * Math.PI) / 180; // radians, as vrm.js reports
+    avatar.headYaw = p.ParamAngleX * (Math.PI / 6); // radians, as vrm.js reports
   });
 }

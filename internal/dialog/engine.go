@@ -39,6 +39,9 @@ type Player interface {
 // Config tunes conversational behaviour.
 type Config struct {
 	SystemPrompt string
+	// Affect asks the model for inline feeling tags ([happy] ...) and
+	// sends each segment's feeling with it, for the avatar's face.
+	Affect bool
 	// MaxHistory caps retained messages (user + assistant), excluding
 	// the system prompt.
 	MaxHistory int
@@ -179,9 +182,10 @@ type streamRef struct {
 // markInfo identifies a playout mark: the start of a spoken segment, or
 // the end of the whole reply.
 type markInfo struct {
-	turn int
-	text string // segment about to be heard; empty for the end mark
-	end  bool
+	turn   int
+	text   string // segment about to be heard; empty for the end mark
+	affect Affect // the segment's feeling, if it changes here
+	end    bool
 }
 
 type turnState struct {
@@ -192,7 +196,8 @@ type turnState struct {
 	fromSentence int
 	fromText     string
 	userText     string
-	played       []string
+	played       []string // segments heard, as spoken (for echo checks)
+	said         []string // the same with their feeling tags (for history)
 	finalAt      time.Time
 	speechEnd    time.Time
 	metrics      TurnMetrics
@@ -527,8 +532,12 @@ func (e *Engine) startTurn(speechEnd time.Time) {
 
 func (e *Engine) promptFor(userText string) []llm.Message {
 	msgs := make([]llm.Message, 0, len(e.history)+2)
-	if e.cfg.SystemPrompt != "" {
-		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: e.cfg.SystemPrompt})
+	system := e.cfg.SystemPrompt
+	if e.cfg.Affect {
+		system = strings.TrimSpace(system + "\n" + affectInstruction)
+	}
+	if system != "" {
+		msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: system})
 	}
 	msgs = append(msgs, e.history...)
 	return append(msgs, llm.Message{Role: llm.RoleUser, Content: userText})
@@ -572,7 +581,7 @@ func (e *Engine) bargeIn() {
 	t := e.turn
 	e.d.Logger.Info("barge-in", "turn", t.id, "played_segments", len(t.played))
 	e.detachTurn(true)
-	heard := strings.Join(t.played, "")
+	heard := strings.Join(t.said, "")
 	if heard == "" {
 		heard = "（刚开口就被打断了）"
 	} else {
@@ -657,10 +666,11 @@ func (e *Engine) onPlayed(id int) {
 		// The segment just started playing: from here on the user has
 		// (at least partly) heard it.
 		t.played = append(t.played, m.text)
-		e.notify(Event{Type: "assistant", Turn: t.id, Text: m.text})
+		t.said = append(t.said, spoken{m.text, m.affect}.tagged())
+		e.notify(Event{Type: "assistant", Turn: t.id, Text: m.text, Affect: m.affect})
 		return
 	}
-	e.commit(t.userText, strings.Join(t.played, ""))
+	e.commit(t.userText, strings.Join(t.said, ""))
 	e.rememberSaid(t)
 	t.cancel()
 	e.audioMu.Lock()
@@ -685,7 +695,7 @@ func (e *Engine) generate(ctx context.Context, id int, msgs []llm.Message) {
 		}
 	}
 
-	segments := make(chan string, 32)
+	segments := make(chan spoken, 32)
 	llmDone := make(chan error, 1)
 	e.gen.Add(1)
 	go func() {
@@ -711,17 +721,28 @@ var errDetached = errors.New("dialog: turn detached")
 
 // segmentReply streams the reply into speakable segments. It always closes
 // segments and returns why it stopped (nil, an LLM error, or ctx's error).
-func (e *Engine) segmentReply(ctx context.Context, msgs []llm.Message, segments chan<- string, onFirst func()) error {
+func (e *Engine) segmentReply(ctx context.Context, msgs []llm.Message, segments chan<- spoken, onFirst func()) error {
 	defer close(segments)
-	send := func(seg string) error {
+	var carry Affect // a feeling tagged where there was nothing to say yet
+	send := func(raw string) error {
+		text, affect, ok := splitAffect(raw)
+		if !ok {
+			affect = carry
+		}
+		if text == "" {
+			carry = affect
+			return nil
+		}
+		carry = ""
 		select {
-		case segments <- seg:
+		case segments <- spoken{text: text, affect: affect}:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 	seg := NewSegmenter()
+	tags := tagScanner{dropUnknown: e.cfg.Affect}
 	first := true
 	for delta, err := range e.d.LLM.Stream(ctx, msgs) {
 		if err != nil {
@@ -736,10 +757,15 @@ func (e *Engine) segmentReply(ctx context.Context, msgs []llm.Message, segments 
 			first = false
 			onFirst()
 		}
-		for _, s := range seg.Push(delta) {
+		for _, s := range seg.Push(tags.Push(delta)) {
 			if err := send(s); err != nil {
 				return err
 			}
+		}
+	}
+	for _, s := range seg.Push(tags.Flush()) {
+		if err := send(s); err != nil {
+			return err
 		}
 	}
 	if s, ok := seg.Flush(); ok {
@@ -752,11 +778,11 @@ func (e *Engine) segmentReply(ctx context.Context, msgs []llm.Message, segments 
 // any audio was queued. The error is nil once segments is drained,
 // errDetached if the turn stopped being current, or whatever stopped
 // synthesis (including ctx's).
-func (e *Engine) speak(ctx context.Context, id int, segments <-chan string, report func(turnEventKind, string, error)) (bool, error) {
+func (e *Engine) speak(ctx context.Context, id int, segments <-chan spoken, report func(turnEventKind, string, error)) (bool, error) {
 	firstAudio, ttsReported := true, false
-	for text := range segments {
-		v := e.newVoice(id, text)
-		for pcm, err := range e.d.TTS.Synthesize(ctx, text) {
+	for s := range segments {
+		v := e.newVoice(id, s)
+		for pcm, err := range e.d.TTS.Synthesize(ctx, s.text) {
 			if err != nil {
 				return !firstAudio, fmt.Errorf("tts: %w", err)
 			}

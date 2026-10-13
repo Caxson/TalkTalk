@@ -44,7 +44,7 @@ func encodeMotion(f lipsync.Frame) []byte {
 type voice struct {
 	e    *Engine
 	turn int
-	text string
+	seg  spoken
 	lips LipStream
 	rate int
 
@@ -56,8 +56,8 @@ type voice struct {
 	detached bool
 }
 
-func (e *Engine) newVoice(turn int, text string) *voice {
-	v := &voice{e: e, turn: turn, text: text, rate: e.d.TTS.SampleRate()}
+func (e *Engine) newVoice(turn int, seg spoken) *voice {
+	v := &voice{e: e, turn: turn, seg: seg, rate: e.d.TTS.SampleRate()}
 	if e.d.Lips != nil {
 		ls, err := e.d.Lips(v.rate)
 		if err != nil {
@@ -110,7 +110,7 @@ func (v *voice) play(pcm []int16) (bool, error) {
 	if !v.started {
 		// Mark the segment start right before its first audio so the
 		// transcript follows what is actually being heard.
-		if !v.e.mark(v.turn, markInfo{turn: v.turn, text: v.text}) {
+		if !v.e.mark(v.turn, markInfo{turn: v.turn, text: v.seg.text, affect: v.seg.affect}) {
 			v.detached = true
 			return false, errDetached
 		}

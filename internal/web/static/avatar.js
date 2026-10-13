@@ -5,6 +5,7 @@
 // Renderers (vrm.js, live2d.js, lam.js) read expression() once per drawn frame.
 
 import { Behavior } from "./behavior.js";
+import { Mood } from "./affect.js";
 
 const RENDERERS = { vrm: "./vrm.js", lam: "./lam.js", live2d: "./live2d.js" };
 const MOTION_HEADER = 4;   // uint32 sequence before the weights
@@ -31,7 +32,14 @@ export class Avatar {
     this.micLevel = () => 0;
     this.lastAct = performance.now();
     this.acted = null;      // latest behavior output, for checks
+    this.mood = new Mood(); // the assistant's feeling, from reply segments
+    this.lips = {};         // speech-only weights of the last frame (before feeling)
+    this.pose = { roll: 0, pitch: 0 };
+    this.lastExpr = performance.now();
   }
+
+  // feel shows an affect sent with a reply segment ("neutral" relaxes).
+  feel(name) { this.mood.feel(name, performance.now()); }
 
   perceive(reading) { this.reading = reading; }
 
@@ -92,22 +100,30 @@ export class Avatar {
   expression() {
     const now = performance.now();
     this.tickFps(now);
-    if (!this.names) return {};
-    const t = now - this.delayMs;
-    this.prune(t);
-
-    let w = this.sample(t);
-    if (!w) {
-      // No motion due: ease the face back to neutral instead of freezing.
-      const k = Math.exp(-16 / RELAX_TAU_MS);
-      w = this.last ? this.last.map((v) => v * k) : new Float32Array(this.names.length);
-    }
-    this.last = w;
     const out = {};
-    this.names.forEach((n, i) => { out[n] = w[i]; });
+    // Speech motion needs the channel names, which arrive with the call;
+    // blinks and feelings do not wait for it.
+    if (this.names) {
+      const t = now - this.delayMs;
+      this.prune(t);
+      let w = this.sample(t);
+      if (!w) {
+        // No motion due: ease the face back to neutral instead of freezing.
+        const k = Math.exp(-16 / RELAX_TAU_MS);
+        w = this.last ? this.last.map((v) => v * k) : new Float32Array(this.names.length);
+      }
+      this.last = w;
+      this.names.forEach((n, i) => { out[n] = w[i]; });
+    }
     const blink = this.blink(now);
     out.eyeBlinkLeft = Math.max(out.eyeBlinkLeft ?? 0, blink);
     out.eyeBlinkRight = Math.max(out.eyeBlinkRight ?? 0, blink);
+    this.lips = { ...out };
+    // The feeling sits under speech: each shape takes the larger of the two.
+    const dt = Math.min(100, now - this.lastExpr);
+    this.lastExpr = now;
+    for (const [k, w] of Object.entries(this.mood.update(now, dt, this.state === "speaking"))) out[k] = Math.max(out[k] ?? 0, w);
+    this.pose = this.mood.pose(); // head roll/pitch for the renderers
     return out;
   }
 

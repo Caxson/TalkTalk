@@ -71,6 +71,7 @@ func newSessions(cfg config.Config, roster *cast.Cast, logger *slog.Logger) (*se
 		Persona: persona,
 		Dialog: dialog.Config{
 			SystemPrompt:      cfg.Conversation.SystemPrompt,
+			Affect:            true,
 			InterruptMinRunes: cfg.Conversation.InterruptMinRunes,
 		},
 		ICEServers: cfg.Conversation.ICEServers,
