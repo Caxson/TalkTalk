@@ -138,3 +138,50 @@ func TestAnswerRejectsBadInput(t *testing.T) {
 		t.Error("accepted empty config")
 	}
 }
+
+func TestPeerVideoTrack(t *testing.T) {
+	c := rtctest.New(t)
+	peer, answer, err := Answer(context.Background(), c.Offer(t), Config{
+		InputSampleRate: 16000,
+		OnAudio:         func([]int16) {},
+		Video:           true,
+		Logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	c.Accept(t, answer)
+	select {
+	case <-c.DCOpened:
+	case <-time.After(5 * time.Second):
+		t.Fatal("connection did not come up")
+	}
+	// An Annex B access unit: start code + IDR slice NAL (type 5).
+	au := append([]byte{0, 0, 0, 1, 0x65}, make([]byte, 200)...)
+	deadline := time.Now().Add(3 * time.Second)
+	for c.VideoPackets() == 0 && time.Now().Before(deadline) {
+		if err := peer.WriteVideo(au, 40*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
+	if c.VideoPackets() == 0 {
+		t.Error("no video reached the client")
+	}
+}
+
+func TestWriteVideoWithoutTrack(t *testing.T) {
+	c := rtctest.New(t)
+	peer, _, err := Answer(context.Background(), c.Offer(t), Config{
+		InputSampleRate: 16000, OnAudio: func([]int16) {},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	if err := peer.WriteVideo([]byte{0, 0, 0, 1, 0x65}, 40*time.Millisecond); err == nil {
+		t.Error("WriteVideo succeeded without a video track")
+	}
+}

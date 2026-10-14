@@ -7,6 +7,7 @@ import (
 	"iter"
 	"log/slog"
 	"math"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/Caxson/TalkTalk/internal/asr"
 	"github.com/Caxson/TalkTalk/internal/dialog"
 	"github.com/Caxson/TalkTalk/internal/llm"
+	"github.com/Caxson/TalkTalk/internal/photoreal/photorealtest"
 	"github.com/Caxson/TalkTalk/internal/rtc/rtctest"
 )
 
@@ -332,5 +334,78 @@ func TestNoCastRejectsNamedCharacters(t *testing.T) {
 	c := rtctest.New(t)
 	if _, _, err := m.Create(context.Background(), c.Offer(t), "mio"); !errors.Is(err, ErrUnknownCharacter) {
 		t.Errorf("err = %v, want ErrUnknownCharacter", err)
+	}
+}
+
+func newVideoManager(t *testing.T, addr string) *Manager {
+	t.Helper()
+	m, err := NewManager(Deps{
+		Recognizer: heardRecognizer{},
+		LLM:        replyLLM{},
+		NewSynth:   func(string) (Synth, error) { return &toneSynth{}, nil },
+		Dialog:     dialog.Config{SystemPrompt: "SYS"},
+		Persona: func(id string) (Persona, error) {
+			return Persona{Character: "rin", Video: "rin", SystemPrompt: "SYS"}, nil
+		},
+		Video:  VideoDeps{Addr: addr, Lead: 200 * time.Millisecond},
+		Max:    1,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		m.CloseAll(ctx)
+	})
+	return m
+}
+
+func TestPhotorealSessionSendsVideoWithVoice(t *testing.T) {
+	w := photorealtest.New(t)
+	m := newVideoManager(t, w.Addr)
+	c := rtctest.New(t)
+	_, answer, err := m.Create(context.Background(), c.Offer(t), "rin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Accept(t, answer)
+	<-c.DCOpened
+	go c.Speak(make([]int16, 48000))
+	waitEvent(t, c, func(e map[string]any) bool {
+		return e["type"] == "state" && e["state"] == "listening" && c.Packets() > 0
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for c.VideoPackets() < 10 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if c.VideoPackets() < 10 {
+		t.Errorf("client got %d video packets", c.VideoPackets())
+	}
+	if got := w.Characters(); len(got) != 1 || got[0] != "rin" {
+		t.Errorf("worker asked for %v", got)
+	}
+	if w.Samples() == 0 {
+		t.Error("worker got no audio")
+	}
+}
+
+func TestPhotorealUnavailableFallsBackToVoice(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	addr := ln.Addr().String()
+	ln.Close() // nothing listens: the worker is down
+	m := newVideoManager(t, addr)
+	c := rtctest.New(t)
+	_, answer, err := m.Create(context.Background(), c.Offer(t), "rin")
+	if err != nil {
+		t.Fatalf("session failed without the worker: %v", err)
+	}
+	c.Accept(t, answer)
+	<-c.DCOpened
+	go c.Speak(make([]int16, 48000))
+	waitEvent(t, c, func(e map[string]any) bool { return e["type"] == "state" && e["state"] == "speaking" })
+	if c.VideoPackets() != 0 {
+		t.Errorf("video packets without a worker: %d", c.VideoPackets())
 	}
 }

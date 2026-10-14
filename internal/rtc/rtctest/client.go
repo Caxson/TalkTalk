@@ -24,8 +24,9 @@ type Client struct {
 	Events   chan map[string]any
 	DCOpened chan struct{}
 
-	mu   sync.Mutex
-	pkts int
+	mu        sync.Mutex
+	pkts      int
+	videoPkts int
 }
 
 // New creates a client closed at test cleanup.
@@ -48,7 +49,13 @@ func New(t testing.TB) *Client {
 	if _, err := pc.AddTransceiverFromTrack(c.mic, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendrecv}); err != nil {
 		t.Fatal(err)
 	}
+	// Like the page, offer to receive video; the server sends it only for
+	// photoreal characters.
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
+		t.Fatal(err)
+	}
 	pc.OnTrack(func(tr *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		video := tr.Kind() == webrtc.RTPCodecTypeVideo
 		for {
 			pkt, _, err := tr.ReadRTP()
 			if err != nil {
@@ -56,7 +63,11 @@ func New(t testing.TB) *Client {
 			}
 			if len(pkt.Payload) > 0 {
 				c.mu.Lock()
-				c.pkts++
+				if video {
+					c.videoPkts++
+				} else {
+					c.pkts++
+				}
 				c.mu.Unlock()
 			}
 		}
@@ -115,6 +126,13 @@ func (c *Client) Speak(pcm []int16) error {
 		time.Sleep(20 * time.Millisecond)
 	}
 	return nil
+}
+
+// VideoPackets is the number of downlink video RTP packets received.
+func (c *Client) VideoPackets() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.videoPkts
 }
 
 // Packets is the number of downlink audio packets received.

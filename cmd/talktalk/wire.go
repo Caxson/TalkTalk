@@ -75,6 +75,7 @@ func newSessions(cfg config.Config, roster *cast.Cast, logger *slog.Logger) (*se
 			InterruptMinRunes: cfg.Conversation.InterruptMinRunes,
 		},
 		ICEServers: cfg.Conversation.ICEServers,
+		Video:      session.VideoDeps{Addr: cfg.Photoreal.Addr, Lead: cfg.Photoreal.Lead},
 		Max:        cfg.Conversation.MaxSessions,
 		Logger:     logger,
 	})

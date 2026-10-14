@@ -24,6 +24,17 @@ import (
 )
 
 // Player is the playout queue (implemented by playout.Player).
+// becomeAudible marks the turn as heard: from here it counts as spoken
+// (no silent take-backs) and the assistant is speaking.
+func (e *Engine) becomeAudible(t *turnState) {
+	t.audible = true
+	e.setState(StateSpeaking)
+}
+
+// playDelayer is implemented by players that start audio after an idle
+// stretch later than it is queued (a lookahead for rendered video).
+type playDelayer interface{ PlayDelay() time.Duration }
+
 type Player interface {
 	Enqueue(pcm []int16)
 	Mark(id int)
@@ -196,6 +207,7 @@ type turnState struct {
 	fromSentence int
 	fromText     string
 	userText     string
+	awaitHeard   bool     // queued audio not heard yet (a delaying player)
 	played       []string // segments heard, as spoken (for echo checks)
 	said         []string // the same with their feeling tags (for history)
 	finalAt      time.Time
@@ -627,12 +639,23 @@ func (e *Engine) onTurnEvent(ev turnEvent) {
 	case evTTSFirst:
 		t.metrics.TTSFirstAudio = since
 	case evAudioOut:
-		t.metrics.FirstAudioOut = since
-		if !t.speechEnd.IsZero() {
-			t.metrics.Total = ev.at.Sub(t.speechEnd)
+		// A player that renders video starts new audio later than it is
+		// queued; count that, since it is when the user hears it.
+		var delay time.Duration
+		if pd, ok := e.d.Player.(playDelayer); ok {
+			delay = pd.PlayDelay()
 		}
-		t.audible = true
-		e.setState(StateSpeaking)
+		t.metrics.FirstAudioOut = since + delay
+		if !t.speechEnd.IsZero() {
+			t.metrics.Total = ev.at.Sub(t.speechEnd) + delay
+		}
+		if delay > 0 {
+			// Not heard yet: until it is, the turn can still be taken back,
+			// and the detector should not expect its own voice.
+			t.awaitHeard = true
+		} else {
+			e.becomeAudible(t)
+		}
 		m := t.metrics
 		e.notify(Event{Type: "metrics", Turn: t.id, Metrics: &m})
 		e.d.Logger.Info("turn latency", "turn", t.id,
@@ -642,7 +665,7 @@ func (e *Engine) onTurnEvent(ev turnEvent) {
 		if ev.err != nil && !errors.Is(ev.err, context.Canceled) {
 			e.d.Logger.Error("turn failed", "turn", t.id, "err", ev.err)
 			e.notify(Event{Type: "error", Turn: t.id, Error: "reply failed"})
-			if !t.audible {
+			if !t.audible && !t.awaitHeard {
 				// Nothing was said; keep the user's words for the next try.
 				e.detachTurn(true)
 				e.notify(Event{Type: "retracted", Turn: t.id})
@@ -665,6 +688,10 @@ func (e *Engine) onPlayed(id int) {
 	if !m.end {
 		// The segment just started playing: from here on the user has
 		// (at least partly) heard it.
+		if t.awaitHeard {
+			t.awaitHeard = false
+			e.becomeAudible(t)
+		}
 		t.played = append(t.played, m.text)
 		t.said = append(t.said, spoken{m.text, m.affect}.tagged())
 		e.notify(Event{Type: "assistant", Turn: t.id, Text: m.text, Affect: m.affect})

@@ -1,5 +1,6 @@
 // Package rtc terminates the browser's WebRTC connection: one bidirectional
-// Opus audio track plus a data channel for conversation events.
+// Opus audio track, an optional H.264 video track (photoreal characters),
+// and a data channel for conversation events.
 package rtc
 
 import (
@@ -41,13 +42,17 @@ type Config struct {
 	// OnMessage receives text messages the client sends on the events
 	// channel (e.g. camera readings). Optional.
 	OnMessage func(msg []byte)
-	Logger    *slog.Logger
+	// Video adds an H.264 track for rendered video (WriteVideo). It shares
+	// the audio track's stream so the browser keeps the two in sync.
+	Video  bool
+	Logger *slog.Logger
 }
 
 // Peer is one browser connection.
 type Peer struct {
 	pc    *webrtc.PeerConnection
 	track *webrtc.TrackLocalStaticSample
+	video *webrtc.TrackLocalStaticSample // nil without Config.Video
 	cfg   Config
 
 	mu      sync.Mutex
@@ -99,6 +104,23 @@ func Answer(ctx context.Context, offer webrtc.SessionDescription, cfg Config) (*
 	}
 	go drainRTCP(sender)
 
+	if cfg.Video {
+		// Constrained baseline, level 3.1: what the worker encodes (720x1280
+		// at 25 fps fits), and what every browser decodes in hardware.
+		p.video, err = webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
+			MimeType: webrtc.MimeTypeH264, ClockRate: 90000,
+			SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+		}, "video", "talktalk")
+		if err != nil {
+			return fail(fmt.Errorf("rtc: video track: %w", err))
+		}
+		vs, err := pc.AddTrack(p.video)
+		if err != nil {
+			return fail(fmt.Errorf("rtc: add video track: %w", err))
+		}
+		go drainRTCP(vs)
+	}
+
 	pc.OnTrack(p.onTrack)
 	pc.OnDataChannel(p.onDataChannel)
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
@@ -138,6 +160,20 @@ func (p *Peer) WriteAudio(packet []byte, d time.Duration) error {
 	default:
 	}
 	return p.track.WriteSample(media.Sample{Data: packet, Duration: d})
+}
+
+// WriteVideo sends one H.264 access unit (Annex B). It matches
+// playout.VideoSink.
+func (p *Peer) WriteVideo(au []byte, d time.Duration) error {
+	if p.video == nil {
+		return errors.New("rtc: no video track")
+	}
+	select {
+	case <-p.closed:
+		return errors.New("rtc: peer closed")
+	default:
+	}
+	return p.video.WriteSample(media.Sample{Data: au, Duration: d})
 }
 
 // Send delivers v as JSON on the events channel, queuing until it opens.

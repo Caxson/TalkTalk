@@ -19,6 +19,7 @@ import (
 	"github.com/Caxson/TalkTalk/internal/dialog"
 	"github.com/Caxson/TalkTalk/internal/lipsync"
 	"github.com/Caxson/TalkTalk/internal/llm"
+	"github.com/Caxson/TalkTalk/internal/photoreal"
 	"github.com/Caxson/TalkTalk/internal/playout"
 	"github.com/Caxson/TalkTalk/internal/rtc"
 	"github.com/Caxson/TalkTalk/internal/tts"
@@ -40,6 +41,9 @@ type Persona struct {
 	Character    string // id, for logs
 	Voice        string
 	SystemPrompt string
+	// Video names the photoreal worker's character; set, the session shows
+	// rendered video instead of driving a browser avatar.
+	Video string
 }
 
 // Synth is a synthesizer with a lifecycle.
@@ -64,6 +68,8 @@ type Deps struct {
 	ICEServers []string
 	Max        int
 	Logger     *slog.Logger
+	// Video renders photoreal characters (Persona.Video).
+	Video VideoDeps
 }
 
 // Manager owns all live sessions.
@@ -193,12 +199,19 @@ func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDesc
 	}
 	dcfg := m.d.Dialog
 	dcfg.SystemPrompt = persona.SystemPrompt
+	// A photoreal character's mouth is drawn by the worker from the audio;
+	// browser-avatar lip-sync would be wasted work.
+	wantVideo := persona.Video != "" && m.d.Video.Addr != ""
+	lips := m.d.Lips
+	if persona.Video != "" {
+		lips = nil
+	}
 	engine, err := dialog.New(dcfg, dialog.Deps{
 		Recognizer: m.d.Recognizer,
 		LLM:        m.d.LLM,
 		TTS:        synth,
 		Player:     player,
-		Lips:       m.d.Lips,
+		Lips:       lips,
 		Notify: func(ev dialog.Event) {
 			if p := peer.Load(); p != nil {
 				p.Send(ev)
@@ -212,21 +225,33 @@ func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDesc
 		return nil, webrtc.SessionDescription{}, err
 	}
 
+	// Reach the worker first: the answer offers video only if it will come.
+	var video *photoreal.Client
+	if wantVideo {
+		video = m.dialVideo(ctx, persona.Video, synth.SampleRate(), log)
+	}
 	p, answer, err := rtc.Answer(ctx, offer, rtc.Config{
 		ICEServers:      m.d.ICEServers,
 		InputSampleRate: m.d.Recognizer.SampleRate(),
 		OnAudio:         func(pcm []int16) { engine.PushAudio(runCtx, pcm) },
 		OnMessage:       func(msg []byte) { onClientMessage(engine, msg) },
 		OnClose:         cancel,
+		Video:           video != nil,
 		Logger:          log,
 	})
 	if err != nil {
 		cancel()
 		synth.Close()
+		if video != nil {
+			video.Close()
+		}
 		return nil, webrtc.SessionDescription{}, err
 	}
 	peer.Store(p)
-	if m.d.Lips != nil {
+	if video != nil {
+		m.startVideo(video, player, &peer, log)
+	}
+	if lips != nil {
 		player.SetMotionSink(p.SendMotion)
 		names := lipsync.Names
 		p.Send(dialog.Event{Type: "avatar", Names: names[:], FrameRate: lipsync.FrameRate, Timestamp: time.Now()})
@@ -240,6 +265,13 @@ func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDesc
 	}()
 
 	var wg sync.WaitGroup
+	if video != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runVideo(runCtx, video, player, log)
+		}()
+	}
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
@@ -258,13 +290,16 @@ func (m *Manager) start(ctx context.Context, id string, offer webrtc.SessionDesc
 	go func() {
 		<-runCtx.Done()
 		p.Close()
+		if video != nil {
+			video.Close()
+		}
 		wg.Wait()
 		synth.Close()
 		m.release(id, s)
 		log.Info("session closed")
 		close(s.done)
 	}()
-	log.Info("session started", "character", persona.Character, "voice", persona.Voice)
+	log.Info("session started", "character", persona.Character, "voice", persona.Voice, "video", video != nil)
 	return s, answer, nil
 }
 

@@ -120,3 +120,22 @@ func TestAffectOffKeepsPromptAndStillStripsTags(t *testing.T) {
 		t.Errorf("prompt = %q", got)
 	}
 }
+
+func TestSpeakingOnlyOnceHeard(t *testing.T) {
+	delayedPlayer = true
+	h := newHarness(t, time.Millisecond, "好的，没问题。")
+	delayedPlayer = false
+	h.say("帮个忙", true)
+	m := h.waitFor("metrics", func(e Event) bool { return e.Type == "metrics" })
+	if m.Metrics.FirstAudioOut < 500*time.Millisecond {
+		t.Errorf("FirstAudioOut %v leaves out the player's 0.5 s delay", m.Metrics.FirstAudioOut)
+	}
+	// The state follows what is heard: speaking once the audio plays,
+	// the player's 0.5 s after it was queued, not when it was queued.
+	queued := time.Now()
+	h.waitState(StateSpeaking)
+	if d := time.Since(queued); d < 400*time.Millisecond {
+		t.Errorf("speaking %v after the audio was queued, before it could be heard", d)
+	}
+	h.waitState(StateListening)
+}

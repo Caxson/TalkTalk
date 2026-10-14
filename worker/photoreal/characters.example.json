@@ -1,0 +1,10 @@
+{
+  "rin": {
+    "source": "/root/autodl-tmp/avatars/rin_idle_loop.mp4",
+    "setup": {"drive_eye": true, "overall_ctrl_info": {"delta_pitch": 2, "vad_alpha": 0.7}}
+  },
+  "yuna": {
+    "source": "/root/autodl-tmp/avatars/yuna_idle_loop.mp4",
+    "setup": {"drive_eye": true, "overall_ctrl_info": {"delta_pitch": 2}}
+  }
+}

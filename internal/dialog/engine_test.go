@@ -214,6 +214,10 @@ func newHarnessWith(t *testing.T, tune func(*Config), perRune time.Duration, rep
 	return newHarnessTTS(t, tune, fakeTTS{perRune: perRune}, replies...)
 }
 
+// delayedPlayer makes the next harness use a player that starts audio
+// later than it is queued. Tests that set it must not run in parallel.
+var delayedPlayer bool
+
 func newHarnessTTS(t *testing.T, tune func(*Config), synth fakeTTS, replies ...string) *harness {
 	t.Helper()
 	player, err := playout.New(16000, func([]byte, time.Duration) error { return nil })
@@ -221,6 +225,10 @@ func newHarnessTTS(t *testing.T, tune func(*Config), synth fakeTTS, replies ...s
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	if delayedPlayer {
+		// A rendered-video lookahead: audio plays 0.5 s after it is queued.
+		player.SetLookahead(25, func([]int16) {}, func([]byte, time.Duration) error { return nil })
+	}
 	go player.Run(ctx)
 
 	h := &harness{

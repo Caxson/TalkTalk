@@ -73,7 +73,8 @@ func TestLoadCast(t *testing.T) {
 
 	// Avatars on, nothing downloaded: voice-only, everyone offered.
 	c, avatars, err := loadCast(cfg, quiet)
-	if err != nil || avatars || len(c.List()) != len(cast.Builtin()) {
+	// No worker configured either: photoreal characters are left out.
+	if err != nil || avatars || len(c.List()) != len(withoutVideo(cast.Builtin(), quiet)) {
 		t.Fatalf("no assets: avatars=%v n=%d err=%v", avatars, len(c.List()), err)
 	}
 
@@ -93,5 +94,32 @@ func TestLoadCast(t *testing.T) {
 	cfg.Avatar.Character = "gone"
 	if _, _, err := loadCast(cfg, quiet); err == nil {
 		t.Error("default character without assets accepted")
+	}
+}
+
+func TestVideoCharacters(t *testing.T) {
+	chars := []cast.Character{
+		{ID: "mio", Name: "Mio", Kind: cast.KindVRM, Model: "avatars/m.vrm"},
+		{ID: "rin", Name: "Rin", Kind: cast.KindVideo, Model: "rin-worker", Background: "avatars/rin.png"},
+	}
+	if got := withoutVideo(chars, quiet); len(got) != 1 || got[0].ID != "mio" {
+		t.Errorf("withoutVideo = %+v", got)
+	}
+	c, err := cast.New(chars, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := personaOf(c, "BASE", "v")("rin")
+	if err != nil || p.Video != "rin-worker" {
+		t.Errorf("rin persona = %+v, %v", p, err)
+	}
+	if p, _ := personaOf(c, "BASE", "v")("mio"); p.Video != "" {
+		t.Errorf("mio persona asks for video: %+v", p)
+	}
+	var cfg config.Config
+	info := castInfo(c, true, cfg, quiet)
+	rin := info.Characters[1]
+	if rin.Kind != "video" || rin.Background != "/assets/avatars/rin.png" || rin.Model != "" || rin.Renderer != "" {
+		t.Errorf("rin info = %+v", rin)
 	}
 }

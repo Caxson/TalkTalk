@@ -2,6 +2,7 @@
 
 import { Avatar } from "./avatar.js";
 import { Perception, perceptionMessage, preloadPerception } from "./perception.js";
+import { mountPhotoreal } from "./photoreal.js";
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -17,6 +18,8 @@ let avatar = null;       // set once the avatar has loaded, if the server has on
 let motionNames = null;  // from the session's "avatar" event; may precede the avatar
 let avatarInfo = null;   // the chosen character from /api/characters, plus perception assets
 let character = "";      // id of the character this page talks to ("" = server default)
+let photoreal = null;    // set for a photoreal (server-rendered video) character
+let characterKind = "";
 
 const STATES = {
   standby:   ["standby.", "待命"],
@@ -326,8 +329,16 @@ async function begin() {
   call = c;
   mic.getTracks().forEach((t) => pc.addTrack(t, mic));
   // The server answers on the same transceiver; its audio arrives here.
+  // A photoreal character's picture comes as a video track; ask for one.
+  if (characterKind === "video") pc.addTransceiver("video", { direction: "recvonly" });
   pc.ontrack = (e) => {
     const stream = e.streams[0] ?? new MediaStream([e.track]);
+    if (e.track.kind === "video") {
+      // One element plays voice and video together; once it does, the audio
+      // element goes quiet (until then it carries the voice).
+      photoreal?.show(stream).then((ok) => { if (ok && call === c) ui.voice.muted = true; });
+      return;
+    }
     ui.voice.srcObject = stream;
     c.meters.addVoice(stream);
   };
@@ -395,6 +406,8 @@ function end() {
   if (c.id) api("DELETE", `/api/sessions/${c.id}`).catch(() => {});
   c.pc.close();
   ui.voice.srcObject = null;
+  ui.voice.muted = false;
+  photoreal?.clear();
   transcript.hearing("", true);
   setLive(false);
 }
@@ -474,6 +487,16 @@ if (ui.still) {
   ui.still.hidden = true;
   castReady.then(async (cast) => {
     const info = cast?.characters.find((c) => c.id === character);
+    characterKind = info?.kind ?? "";
+    if (info?.kind === "video") {
+      document.body.classList.add("avatar");
+      ui.still.hidden = false;
+      $("still-take").textContent = `${info.name} · Take 01 · live`;
+      $("still-load").hidden = true;
+      $("still-canvas").setAttribute("aria-label", `${info.name}, TalkTalk video`);
+      photoreal = mountPhotoreal($("still-canvas"), info, { fps: $("still-fps"), sync: $("still-sync") });
+      return;
+    }
     if (!info?.model) return; // voice only
     document.body.classList.add("avatar");
     ui.still.hidden = false;
@@ -496,6 +519,7 @@ if (ui.still) {
 window.__talktalk = {
   state: () => ui.stage.dataset.state, live: () => Boolean(call), events: () => eventLog, character: () => character,
   feel: (name) => avatar?.feel(name),
+  video: () => photoreal && { playing: photoreal.playing, w: photoreal.element.videoWidth, h: photoreal.element.videoHeight, t: photoreal.element.currentTime, frames: photoreal.element.getVideoPlaybackQuality?.().totalVideoFrames ?? null, dropped: photoreal.element.getVideoPlaybackQuality?.().droppedVideoFrames ?? null },
   l2d: () => avatar?.l2d,
   param: (id, v) => { if (avatar) avatar.paramOverride = { ...(avatar.paramOverride ?? {}), [id]: v }; },
   avatar: () => avatar && { received: avatar.received, fps: avatar.fps, delay: avatar.delayMs, jaw: avatar.last?.[avatar.names?.indexOf("jawOpen")] ?? null, mouth: avatar.mouth,

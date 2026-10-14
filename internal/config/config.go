@@ -45,6 +45,7 @@ type Config struct {
 	Speech       Speech
 	Conversation Conversation
 	Avatar       Avatar
+	Photoreal    Photoreal
 }
 
 // LookupFunc matches os.LookupEnv so tests can inject an environment.

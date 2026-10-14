@@ -85,7 +85,16 @@ browser ◀─Opus/WebRTC── 20 ms playout ◀── TTS per sentence ◀─�
   and upward glance, lowered eyes, a frown. Feelings ease in over ~0.2 s,
   sit under lip-sync, and linger 2.5 s after the speech before relaxing.
   Live2D values are mapped through each model's own parameter ranges.
-- **Photoreal (experimental, not in the default cast).** A LAM
+- **Photoreal video (Rin, Yuna).** Real-looking people rendered on a GPU
+  worker (`worker/photoreal`, Ditto with TensorRT): it gets each moment's
+  audio `TALKTALK_PHOTOREAL_LEAD_MS` (default 1200) before it plays and
+  returns H.264 frames that go out with that audio on a WebRTC video track,
+  so the mouth follows the voice within a frame. Head, hair and body move
+  as one picture. Set `TALKTALK_PHOTOREAL_ADDR` (an SSH tunnel to the
+  worker) and put each character's still in `assets/avatars/`; without a
+  worker they are not offered. Costs: replies start about the lead later,
+  and after a barge-in the lips may keep moving for up to the lead.
+- **Photoreal head on a still (experimental, not in the default cast).** A LAM
   Gaussian-splat head composited onto the
   photo it was made from: the photo gives hair, body and room, and only
   the rendered face shows, fitted onto the photo's face by MediaPipe

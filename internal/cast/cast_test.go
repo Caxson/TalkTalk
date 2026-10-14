@@ -137,3 +137,22 @@ func TestVoiceOnlyKeepsEveryone(t *testing.T) {
 		t.Fatalf("List = %+v, %v", c.List(), err)
 	}
 }
+
+func TestVideoCharacters(t *testing.T) {
+	rin := Character{ID: "rin", Name: "Rin", Kind: KindVideo, Model: "rin", Background: "avatars/rin.png"}
+	// The model is the worker's id, not a file: only the still must exist.
+	dir := assetsWith(t, "avatars/rin.png")
+	c, err := New([]Character{rin}, "", InDir(dir))
+	if err != nil || len(c.List()) != 1 {
+		t.Fatalf("video character with its still: %+v, %v", c.List(), err)
+	}
+	c, _ = New([]Character{rin}, "", InDir(t.TempDir()))
+	if len(c.List()) != 0 {
+		t.Error("video character offered without its still")
+	}
+	bad := rin
+	bad.Model = "avatars/rin.mp4"
+	if _, err := New([]Character{bad}, "", nil); err == nil {
+		t.Error("video model accepted as a path")
+	}
+}

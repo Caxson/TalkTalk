@@ -20,6 +20,10 @@ const (
 	KindVRM    = "vrm"    // anime 3D (three-vrm)
 	KindLAM    = "lam"    // photoreal Gaussian splats
 	KindLive2D = "live2d" // anime 2D
+	// KindVideo is photoreal video rendered by the GPU worker; Model names
+	// the worker's character and Background is the still shown before
+	// video arrives.
+	KindVideo = "video"
 )
 
 // runtime lists the files each renderer needs, relative to the assets dir.
@@ -27,6 +31,7 @@ var runtime = map[string][]string{
 	KindVRM:    {"vendor/three-vrm.module.min.js", "vendor/three-vrm-animation.module.min.js", "vendor/three/three.module.js"},
 	KindLAM:    {"vendor/gaussian-splat-renderer-for-lam.module.js"},
 	KindLive2D: {"vendor/live2d/live2dcubismcore.min.js", "vendor/live2d/cubism.es.js", "vendor/pixi/pixi.min.mjs"},
+	KindVideo:  {},
 }
 
 // RendererModule is the ES module each renderer's client code loads first.
@@ -75,12 +80,25 @@ func (c Character) validate() error {
 	if c.Model == "" {
 		return fmt.Errorf("%s: model is required", c.ID)
 	}
-	for _, p := range []string{c.Model, c.Animation, c.Background} {
+	if c.Kind == KindVideo && !validID.MatchString(c.Model) {
+		return fmt.Errorf("%s: model %q must be the worker's character id", c.ID, c.Model)
+	}
+	for _, p := range c.files() {
 		if p != "" && !isLocalPath(p) {
 			return fmt.Errorf("%s: asset path %q must be a clean relative path under avatars/ or vendor/", c.ID, p)
 		}
 	}
 	return nil
+}
+
+// files are the character's own asset files (a video character's model
+// lives on the worker, not here).
+func (c Character) files() []string {
+	model := c.Model
+	if c.Kind == KindVideo {
+		model = ""
+	}
+	return []string{model, c.Animation, c.Background}
 }
 
 // servedDirs are the asset folders the server publishes (main.go).
@@ -137,7 +155,7 @@ func New(chars []Character, def string, exists Exists) (*Cast, error) {
 	}
 	cs := &Cast{}
 	for _, c := range chars {
-		if exists == nil || present(exists, append([]string{c.Model, c.Animation, c.Background}, runtime[c.Kind]...)) {
+		if exists == nil || present(exists, append(c.files(), runtime[c.Kind]...)) {
 			cs.chars = append(cs.chars, c)
 		}
 	}

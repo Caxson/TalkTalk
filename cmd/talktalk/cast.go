@@ -28,6 +28,9 @@ func loadCast(cfg config.Config, logger *slog.Logger) (*cast.Cast, bool, error) 
 	if avatars {
 		exists = cast.InDir(cfg.Avatar.AssetsDir)
 	}
+	if cfg.Photoreal.Addr == "" {
+		chars = withoutVideo(chars, logger) // nothing could render them
+	}
 	c, err := cast.New(chars, cfg.Avatar.Character, exists)
 	if err != nil {
 		return nil, false, err
@@ -48,6 +51,19 @@ func loadCast(cfg config.Config, logger *slog.Logger) (*cast.Cast, bool, error) 
 	return c, avatars, nil
 }
 
+// withoutVideo drops photoreal characters, for a server with no worker.
+func withoutVideo(chars []cast.Character, logger *slog.Logger) []cast.Character {
+	out := make([]cast.Character, 0, len(chars))
+	for _, ch := range chars {
+		if ch.Kind == cast.KindVideo {
+			logger.Info("photoreal character off: TALKTALK_PHOTOREAL_ADDR not set", "id", ch.ID)
+			continue
+		}
+		out = append(out, ch)
+	}
+	return out
+}
+
 // personaOf resolves a session's character for the session manager.
 func personaOf(c *cast.Cast, basePrompt, defaultVoice string) func(string) (session.Persona, error) {
 	return func(id string) (session.Persona, error) {
@@ -62,7 +78,11 @@ func personaOf(c *cast.Cast, basePrompt, defaultVoice string) func(string) (sess
 		if voice == "" {
 			voice = defaultVoice
 		}
-		return session.Persona{Character: ch.ID, Voice: voice, SystemPrompt: ch.SystemPrompt(basePrompt)}, nil
+		p := session.Persona{Character: ch.ID, Voice: voice, SystemPrompt: ch.SystemPrompt(basePrompt)}
+		if ch.Kind == cast.KindVideo {
+			p.Video = ch.Model
+		}
+		return p, nil
 	}
 }
 
@@ -71,7 +91,9 @@ func castInfo(c *cast.Cast, avatars bool, cfg config.Config, logger *slog.Logger
 	info := &server.CastInfo{Default: c.Default().ID, Characters: []server.CharacterInfo{}}
 	for _, ch := range c.List() {
 		ci := server.CharacterInfo{ID: ch.ID, Name: ch.Name, Tagline: ch.Tagline, Kind: ch.Kind, Credit: ch.Credit}
-		if avatars {
+		if ch.Kind == cast.KindVideo {
+			ci.Background = assetURL(ch.Background) // shown until video arrives
+		} else if avatars {
 			ci.Renderer = assetURL(cast.RendererModule[ch.Kind])
 			ci.Model = assetURL(ch.Model)
 			ci.Animation = assetURL(ch.Animation)

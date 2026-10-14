@@ -52,6 +52,17 @@ type Player struct {
 	nextPlay     int64 // index of the next queued frame to play
 	motion       []motionItem
 	motionSink   MotionSink
+
+	// Lookahead for rendered video (video.go): slots are the ticks fed but
+	// not played yet (true: a queued frame), fed counts queued frames
+	// already fed (always a prefix of the queue's frames).
+	ahead      int
+	feed       Feed
+	slots      []bool
+	fed        int
+	slotPlayed int64
+	video      map[int64][]byte
+	videoSink  VideoSink
 }
 
 // gainStep bounds the gain change per 20ms frame, so ducking ramps over a
@@ -128,6 +139,12 @@ func (p *Player) Flush() []int {
 	p.framer.Reset()
 	p.nextPlay = p.queuedFrames // dropped frames never play
 	p.motion = nil
+	// Fed slots that held dropped audio now play silence. Their video was
+	// drawn speaking; it still plays, a short mismatch after a barge-in.
+	for i := range p.slots {
+		p.slots[i] = false
+	}
+	p.fed = 0
 	// Whatever plays next starts at full volume.
 	p.gain, p.targetGain = 1, 1
 	return dropped
@@ -154,7 +171,10 @@ func (p *Player) run(ctx context.Context, ticks <-chan time.Time) error {
 			return nil
 		case <-ticks:
 		}
-		frame, marks, motion := p.next()
+		frame, marks, motion, feed, video := p.next()
+		if feed != nil { // only while a lookahead is on (it can be stopped)
+			p.feed(feed)
+		}
 		for _, id := range marks {
 			p.emit(id)
 		}
@@ -165,9 +185,15 @@ func (p *Player) run(ctx context.Context, ticks <-chan time.Time) error {
 		if err := p.sink(pkt, audio.FrameDuration); err != nil {
 			return fmt.Errorf("playout: sink: %w", err)
 		}
-		// Motion leaves with the audio it belongs to, in the same tick.
+		// Motion and video leave with the audio they belong to, in the
+		// same tick.
 		for _, m := range motion {
 			p.motionSink(m)
+		}
+		for _, v := range video {
+			if err := p.videoSink(v, VideoFrameDuration); err != nil {
+				return fmt.Errorf("playout: video sink: %w", err)
+			}
 		}
 	}
 }
@@ -175,10 +201,58 @@ func (p *Player) run(ctx context.Context, ticks <-chan time.Time) error {
 // next pops marks that are due plus at most one frame, and the motion
 // payloads that belong to that frame. Marks after the popped frame are
 // emitted on the following tick, once that frame has been handed to the
-// sink.
-func (p *Player) next() ([]int16, []int, [][]byte) {
+// sink. With a lookahead it also returns the audio to feed and the video
+// frames due.
+func (p *Player) next() (frame []int16, marks []int, motion [][]byte, feed []int16, video [][]byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.ahead > 0 {
+		return p.nextAhead()
+	}
+	frame, marks, motion = p.nextFrame()
+	return frame, marks, motion, nil, nil
+}
+
+// nextAhead is next with a lookahead: feed the newest slot, then play the
+// oldest one once the lookahead is full. Called with mu held.
+func (p *Player) nextAhead() (frame []int16, marks []int, motion [][]byte, feed []int16, video [][]byte) {
+	feed = p.feedNext()
+	if len(p.slots) <= p.ahead {
+		return p.silence, nil, nil, feed, nil // filling the lookahead
+	}
+	audible := p.slots[0]
+	p.slots = p.slots[1:]
+	video = p.dueVideo(p.slotPlayed)
+	p.slotPlayed++
+	if audible {
+		p.fed--
+		frame, marks, motion = p.nextFrame()
+		return frame, marks, motion, feed, video
+	}
+	// A silent slot: marks with no audio left to precede (e.g. the end of
+	// an empty reply) are due now; marks ahead of queued audio wait for it.
+	if !p.hasFrames() {
+		for len(p.queue) > 0 {
+			marks = append(marks, p.queue[0].mark)
+			p.queue = p.queue[1:]
+		}
+		p.queue = nil
+	}
+	return p.silence, marks, nil, feed, video
+}
+
+func (p *Player) hasFrames() bool {
+	for _, it := range p.queue {
+		if it.frame != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// nextFrame pops leading marks, one frame (silence if none) with its
+// motion, and the marks right behind it. Called with mu held.
+func (p *Player) nextFrame() ([]int16, []int, [][]byte) {
 	var marks []int
 	for len(p.queue) > 0 && p.queue[0].frame == nil {
 		marks = append(marks, p.queue[0].mark)

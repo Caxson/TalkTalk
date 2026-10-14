@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Provider and conversation settings.
 const (
@@ -28,6 +31,9 @@ const (
 	EnvAssetsDir      = "TALKTALK_ASSETS_DIR"
 	EnvCharacter      = "TALKTALK_CHARACTER"
 	EnvCastFile       = "TALKTALK_CAST_FILE"
+
+	EnvPhotorealAddr = "TALKTALK_PHOTOREAL_ADDR"
+	EnvPhotorealLead = "TALKTALK_PHOTOREAL_LEAD_MS"
 )
 
 // Defaults chosen from measured latency (see README).
@@ -88,6 +94,15 @@ type Conversation struct {
 	ICEServers        []string
 }
 
+// Photoreal configures the GPU worker that renders photoreal characters
+// (worker/photoreal). An empty Addr leaves those characters out.
+type Photoreal struct {
+	Addr string // host:port, usually an SSH tunnel to the worker
+	// Lead is how far ahead of playback audio goes to the worker: enough
+	// for it to draw the frames in time (it measured ~1 s, p95).
+	Lead time.Duration
+}
+
 func loadProviders(r *reader, cfg *Config) {
 	cfg.LLM = LLM{
 		BaseURL: r.str(EnvLLMBaseURL, DefaultLLMBaseURL),
@@ -124,5 +139,9 @@ func loadProviders(r *reader, cfg *Config) {
 		InterruptMinRunes: r.intIn(EnvInterruptMinRune, 2, 1, 20),
 		MaxSessions:       r.intIn(EnvMaxSessions, DefaultMaxSessions, 1, 1000),
 		ICEServers:        r.list(EnvICEServers),
+	}
+	cfg.Photoreal = Photoreal{
+		Addr: r.str(EnvPhotorealAddr, ""),
+		Lead: time.Duration(r.intIn(EnvPhotorealLead, 1200, 600, 3000)) * time.Millisecond,
 	}
 }
